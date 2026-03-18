@@ -1,0 +1,130 @@
+#compdef sortie
+
+_sortie() {
+    local -a commands
+    commands=(
+        'scan:Scan directories and apply rules'
+        'watch:Watch directories and dispatch files in real time'
+        'history:Show action history'
+        'undo:Reverse recent dispatch actions'
+        'rules:List configured rules'
+        'config:Show configuration'
+        'status:Show watcher status'
+        'trash:Manage the trash directory'
+        'man:Display the manual page'
+        'help:Help about any command'
+        'completion:Generate the autocompletion script for the specified shell'
+    )
+
+    _arguments -C \
+        '(- *)--help[Show help]' \
+        '(- *)--version[Show version]' \
+        '--config=[Config file path]:path:_files' \
+        {-v,--verbose}'[Verbose output]' \
+        '1: :->cmd' \
+        '*:: :->args'
+
+    case $state in
+    cmd)
+        _describe 'command' commands
+        ;;
+    args)
+        case $words[1] in
+        scan)
+            _arguments \
+                '(- *)--help[Show help]' \
+                '--dry-run[Preview actions without executing]' \
+                '*:directory:_directories'
+            ;;
+        watch)
+            _arguments \
+                '(- *)--help[Show help]' \
+                '--dry-run[Log actions without executing]' \
+                '--debounce=[Debounce duration]:duration:'
+            ;;
+        history)
+            _arguments \
+                '(- *)--help[Show help]' \
+                {-n,--limit}'[Max records to show]:number:'
+            ;;
+        undo)
+            _arguments \
+                '(- *)--help[Show help]' \
+                '--last[Number of actions to undo]:number:' \
+                '1:id:'
+            ;;
+        rules)
+            local -a rules_commands
+            rules_commands=(
+                'test:Show which rule matches a file'
+            )
+            _arguments -C \
+                '(- *)--help[Show help]' \
+                '1: :->subcmd' \
+                '*:: :->subargs'
+            case $state in
+            subcmd)
+                _describe 'rules command' rules_commands
+                ;;
+            subargs)
+                case $words[1] in
+                test)
+                    _arguments \
+                        '(- *)--help[Show help]' \
+                        '1:file:_files'
+                    ;;
+                esac
+                ;;
+            esac
+            ;;
+        config)
+            local -a config_commands
+            config_commands=(
+                'init:Create a starter config file'
+                'path:Print config file path'
+            )
+            _arguments -C \
+                '(- *)--help[Show help]' \
+                '1: :->subcmd' \
+                '*:: :->subargs'
+            case $state in
+            subcmd)
+                _describe 'config command' config_commands
+                ;;
+            subargs)
+                _arguments '(- *)--help[Show help]'
+                ;;
+            esac
+            ;;
+        trash)
+            local -a trash_commands
+            trash_commands=(
+                'purge:Permanently delete all files in trash'
+            )
+            _arguments -C \
+                '(- *)--help[Show help]' \
+                '1: :->subcmd' \
+                '*:: :->subargs'
+            case $state in
+            subcmd)
+                _describe 'trash command' trash_commands
+                ;;
+            subargs)
+                _arguments '(- *)--help[Show help]'
+                ;;
+            esac
+            ;;
+        status|man)
+            _arguments '(- *)--help[Show help]'
+            ;;
+        completion)
+            _arguments \
+                '(- *)--help[Show help]' \
+                '1:shell:(bash zsh fish powershell)'
+            ;;
+        esac
+        ;;
+    esac
+}
+
+_sortie "$@"

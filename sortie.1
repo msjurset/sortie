@@ -1,0 +1,244 @@
+.TH SORTIE 1 "March 2026" "sortie dev" "User Commands"
+.SH NAME
+sortie \- intelligent file dispatcher
+.SH SYNOPSIS
+.B sortie
+.RI [ command ]
+.RI [ flags ]
+.SH DESCRIPTION
+.B sortie
+is a rule\-based file routing tool that watches directories (like ~/Downloads
+and ~/Desktop) and automatically moves, copies, renames, compresses, or deletes
+files based on configurable rules.
+.PP
+Configuration uses a hybrid approach: a central config file at
+.I ~/.config/sortie/config.yaml
+defines watched directories and global rules, while optional per\-directory
+.I .sortie.yaml
+files add or override rules for specific directories. Per\-directory rules
+take precedence over global rules (first\-match\-wins evaluation).
+.SH COMMANDS
+.TP
+.B scan \fR[\fIdirectory...\fR]
+Scan one or more directories (or all configured directories) and apply matching
+rules. Use \fB\-\-dry\-run\fR to preview without executing.
+.TP
+.B watch
+Watch all configured directories for new files in real time. Runs as a
+foreground daemon with configurable debounce. Exits cleanly on SIGINT/SIGTERM.
+.TP
+.B history
+Show recent dispatch actions. Use \fB\-n\fR or \fB\-\-limit\fR to control output.
+.TP
+.B undo \fR[\fIid\fR]
+Reverse the most recent action, or a specific action by ID. Use \fB\-\-last N\fR
+to undo the last N actions.
+.TP
+.B rules
+List all configured rules (global and per\-directory).
+.TP
+.B rules test \fR\fIfile\fR
+Show which rule would match a given file.
+.TP
+.B config
+Show the resolved configuration.
+.TP
+.B config init
+Create a starter config file with commented examples.
+.TP
+.B config path
+Print the config file path.
+.TP
+.B status
+Check if the watcher daemon is running, show watched directories and rule counts.
+.TP
+.B trash
+List files in the trash directory.
+.TP
+.B trash purge
+Permanently delete all files in trash.
+.TP
+.B man
+Display this manual page.
+.SH OPTIONS
+.TP
+.BR \-\-config " " \fIpath\fR
+Config file path. Default: \fI~/.config/sortie/config.yaml\fR.
+.TP
+.BR \-v ", " \-\-verbose
+Enable verbose output.
+.TP
+.BR \-\-version
+Show version information.
+.TP
+.BR \-h ", " \-\-help
+Show help.
+.SS "scan flags"
+.TP
+.BR \-\-dry\-run
+Preview actions without executing.
+.SS "watch flags"
+.TP
+.BR \-\-dry\-run
+Log what would happen without executing.
+.TP
+.BR \-\-debounce " " \fIduration\fR
+Debounce period for file events. Default: 500ms.
+.SS "history flags"
+.TP
+.BR \-n ", " \-\-limit " " \fIN\fR
+Maximum number of records to show. Default: 20.
+.SS "undo flags"
+.TP
+.BR \-\-last " " \fIN\fR
+Number of recent actions to undo. Default: 1.
+.SH CONFIGURATION
+.SS "Central Config"
+Located at \fI~/.config/sortie/config.yaml\fR. Run \fBsortie config init\fR to
+generate a starter file.
+.PP
+.nf
+directories:
+  \- path: ~/Downloads
+    recursive: false
+
+rules:
+  \- name: images\-to\-photos
+    match:
+      extensions: [.jpg, .jpeg, .png, .heic]
+    action:
+      type: move
+      dest: ~/Pictures/Sorted/{{.Year}}/{{.Month}}
+.fi
+.SS "Per\-Directory Config"
+Place a \fI.sortie.yaml\fR file in any watched directory. These rules are
+evaluated before global rules for that directory.
+.PP
+.nf
+rules:
+  \- name: pdfs\-to\-documents
+    match:
+      extensions: [.pdf]
+    action:
+      type: move
+      dest: ~/Documents/PDFs
+.fi
+.SS "Match Conditions"
+All specified conditions use AND logic.
+.TP
+.B extensions
+List of file extensions (e.g., [.jpg, .png]).
+.TP
+.B glob
+Filename glob pattern (e.g., "Screenshot*").
+.TP
+.B regex
+Regular expression matched against filename.
+.TP
+.B min_size\fR, \fBmax_size
+File size thresholds (e.g., "500MB", "1GB").
+.TP
+.B min_age\fR, \fBmax_age
+File age thresholds (e.g., "30d", "2h").
+.TP
+.B mime_type
+MIME type prefix match (e.g., "image/", "application/pdf").
+.SS "Action Types"
+.TP
+.B move
+Move the file to the destination.
+.TP
+.B copy
+Copy the file to the destination.
+.TP
+.B rename
+Rename the file using a template.
+.TP
+.B delete
+Move the file to the trash directory (~/.config/sortie/trash/).
+.TP
+.B compress
+Gzip the file and remove the original.
+.SS "Template Variables"
+Destination paths support Go template syntax:
+.TP
+.B {{.Name}}
+Filename without extension.
+.TP
+.B {{.Ext}}
+Extension including dot.
+.TP
+.B {{.Year}}\fR, \fB{{.Month}}\fR, \fB{{.Day}}
+From file modification time.
+.TP
+.B {{.Date}}
+YYYY\-MM\-DD format.
+.TP
+.B {{.Time}}
+HH\-MM\-SS format.
+.SH FILES
+.TP
+.I ~/.config/sortie/config.yaml
+Central configuration file.
+.TP
+.I ~/.config/sortie/history.json
+Action history (JSON Lines format).
+.TP
+.I ~/.config/sortie/trash/
+Trash directory for deleted files.
+.TP
+.I ~/.config/sortie/logs/
+Log directory for watch mode.
+.TP
+.I ~/.config/sortie/sortie.pid
+PID file written by the watcher daemon.
+.TP
+.I .sortie.yaml
+Per\-directory rule overrides.
+.SH EXAMPLES
+Initialize configuration:
+.PP
+.nf
+$ sortie config init
+.fi
+.PP
+Preview what would happen in ~/Downloads:
+.PP
+.nf
+$ sortie scan ~/Downloads \-\-dry\-run
+.fi
+.PP
+Run the scan for real:
+.PP
+.nf
+$ sortie scan
+.fi
+.PP
+Start watching in real time:
+.PP
+.nf
+$ sortie watch
+.fi
+.PP
+Check which rule matches a file:
+.PP
+.nf
+$ sortie rules test ~/Downloads/report.pdf
+.fi
+.PP
+Undo the last 3 actions:
+.PP
+.nf
+$ sortie undo \-\-last 3
+.fi
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+Error occurred.
+.SH SEE ALSO
+.BR find (1),
+.BR mv (1),
+.BR fswatch (1)
