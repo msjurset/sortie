@@ -87,12 +87,34 @@ directories:
 # Global rules — evaluated in order, first match wins.
 # Per-directory rules (.sortie.yaml) take precedence over these.
 rules:
+  - name: screen-captures
+    match:
+      glob: "screencapture-*"
+      extensions: [.jpg, .jpeg, .png, .heic, .gif, .webp]
+    action:
+      type: move
+      dest: ~/Downloads/Screenshots/screencap-{{.Date}}_{{.Time}}{{.Ext}}
+
   # - name: images-to-photos
   #   match:
   #     extensions: [.jpg, .jpeg, .png, .heic, .gif, .webp]
   #   action:
   #     type: move
-  #     dest: ~/Pictures/Sorted/{{.Year}}/{{.Month}}
+  #     dest: ~/Downloads/Images/{{.Year}}/{{.Month}}
+
+  - name: installers
+    match:
+      extensions: [.dmg, .pkg, .app]
+    action:
+      type: move
+      dest: ~/Downloads/Installers
+
+  # - name: pdfs
+  #   match:
+  #     extensions: [.pdf]
+  #   action:
+  #     type: move
+  #     dest: ~/Downloads/PDFs/{{.Year}}-{{.Month}}
 
   # - name: old-downloads
   #   match:
@@ -100,12 +122,12 @@ rules:
   #   action:
   #     type: delete
 
-  # - name: large-files
-  #   match:
-  #     min_size: 500MB
-  #   action:
-  #     type: move
-  #     dest: ~/LargeFiles
+  - name: large-files
+    match:
+      min_size: 500MB
+    action:
+      type: move
+      dest: ~/Downloads/LargeFiles
 `
 
 	if err := os.WriteFile(path, []byte(starter), 0o644); err != nil {

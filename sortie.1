@@ -231,6 +231,35 @@ Undo the last 3 actions:
 .nf
 $ sortie undo \-\-last 3
 .fi
+.SH RUNNING AS A SERVICE
+On macOS, sortie can run as a launchd user agent to watch directories
+automatically at login.
+.PP
+Install the service:
+.PP
+.nf
+$ make install\-launchd
+.fi
+.PP
+This creates a plist at
+.I ~/Library/LaunchAgents/com.msjurset.sortie.plist
+that starts
+.B sortie watch
+at login. Logs go to
+.IR ~/.config/sortie/logs/sortie.log .
+.PP
+Manage the service:
+.PP
+.nf
+# Stop
+$ launchctl unload ~/Library/LaunchAgents/com.msjurset.sortie.plist
+
+# Start
+$ launchctl load ~/Library/LaunchAgents/com.msjurset.sortie.plist
+
+# Uninstall
+$ make uninstall\-launchd
+.fi
 .SH EXIT STATUS
 .TP
 .B 0
@@ -238,6 +267,10 @@ Success.
 .TP
 .B 1
 Error occurred.
+.SH AUTHOR
+Mark Sjurseth
+.SH COPYRIGHT
+Copyright (c) 2026 Mark Sjurseth. MIT License.
 .SH SEE ALSO
 .BR find (1),
 .BR mv (1),
