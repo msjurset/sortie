@@ -66,6 +66,11 @@ func runWatch(cmd *cobra.Command, args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// Monitor our own binary for changes so the daemon restarts with the
+	// new version (launchd KeepAlive will relaunch after exit).
+	ctx, stop2 := monitorBinary(ctx, logger)
+	defer stop2()
+
 	fmt.Printf("Watching %d directory(ies)...\n", len(dirs))
 	for _, d := range dirs {
 		fmt.Printf("  %s\n", d)
@@ -115,4 +120,52 @@ func runWatch(cmd *cobra.Command, args []string) error {
 			matched.Name,
 		)
 	})
+}
+
+// monitorBinary polls the running binary's modification time and cancels the
+// context when it changes, allowing launchd's KeepAlive to relaunch with the
+// new version.
+func monitorBinary(parent context.Context, logger *log.Logger) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(parent)
+
+	exe, err := os.Executable()
+	if err != nil {
+		logger.Printf("warning: cannot monitor binary: %v", err)
+		return ctx, cancel
+	}
+	exe, err = filepath.EvalSymlinks(exe)
+	if err != nil {
+		logger.Printf("warning: cannot resolve binary path: %v", err)
+		return ctx, cancel
+	}
+
+	info, err := os.Stat(exe)
+	if err != nil {
+		logger.Printf("warning: cannot stat binary: %v", err)
+		return ctx, cancel
+	}
+	startMod := info.ModTime()
+
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				info, err := os.Stat(exe)
+				if err != nil {
+					continue
+				}
+				if !info.ModTime().Equal(startMod) {
+					logger.Printf("binary changed, restarting...")
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+
+	return ctx, cancel
 }

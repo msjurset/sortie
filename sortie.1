@@ -7,9 +7,10 @@ sortie \- intelligent file dispatcher
 .RI [ flags ]
 .SH DESCRIPTION
 .B sortie
-is a rule\-based file routing tool that watches directories (like ~/Downloads
-and ~/Desktop) and automatically moves, copies, renames, compresses, or deletes
-files based on configurable rules.
+is a rule\-based file automation tool that watches directories (like ~/Downloads
+and ~/Desktop) and automatically dispatches files based on configurable rules.
+Actions include moving, copying, renaming, compressing, extracting, running shell
+commands, converting media, encrypting, uploading to cloud storage, and more.
 .PP
 Configuration uses a hybrid approach: a central config file at
 .I ~/.config/sortie/config.yaml
@@ -25,7 +26,9 @@ rules. Use \fB\-\-dry\-run\fR to preview without executing.
 .TP
 .B watch
 Watch all configured directories for new files in real time. Runs as a
-foreground daemon with configurable debounce. Exits cleanly on SIGINT/SIGTERM.
+foreground daemon with configurable debounce. Monitors its own binary and
+exits gracefully when a new version is deployed. Exits cleanly on
+SIGINT/SIGTERM.
 .TP
 .B history
 Show recent dispatch actions. Use \fB\-n\fR or \fB\-\-limit\fR to control output.
@@ -159,14 +162,79 @@ Move the file to the trash directory (~/.config/sortie/trash/).
 .TP
 .B compress
 Gzip the file and remove the original.
+.TP
+.B extract
+Extract an archive (.zip, .tar, .tar.gz, .tar.bz2, .tar.xz) into the destination
+directory. Supports zip via Go stdlib and tar variants via stdlib or \fBtar\fR(1).
+.TP
+.B symlink
+Create a symbolic link at the destination pointing to the original file. The
+source file is preserved.
+.TP
+.B chmod
+Change file permissions. Requires the \fBmode\fR field (e.g., "0755"). Undoable \(em
+the original permissions are restored.
+.TP
+.B checksum
+Compute a hash of the file and write a sidecar (e.g., \fIfile.sha256\fR). Supports
+\fBalgorithm\fR: "sha256" (default), "md5", "sha1". Optional \fBdest\fR overrides
+sidecar path.
+.TP
+.B exec
+Run an arbitrary shell command. The \fBcommand\fR field is template\-expanded (supports
+\fB{{.Path}}\fR for full file path). Not undoable.
+.TP
+.B notify
+Send a desktop notification (macOS via \fBosascript\fR) or webhook. If \fBmessage\fR
+starts with http:// or https://, an HTTP POST with file metadata is sent. Requires
+\fBtitle\fR and \fBmessage\fR fields. Not undoable.
+.TP
+.B convert
+Run an external converter tool. Requires \fBtool\fR (e.g., "ffmpeg", "convert",
+"pandoc") and \fBargs\fR (template\-expanded arguments). Source file is preserved.
+Use \fB{{.Dest}}\fR in args to reference the output path.
+.TP
+.B resize
+Resize an image. Default tool is \fBsips\fR (macOS). Supports \fBwidth\fR,
+\fBheight\fR, and \fBpercentage\fR fields. Set \fBtool\fR to "convert" for
+ImageMagick. Source file is preserved.
+.TP
+.B watermark
+Stamp an image with an overlay using ImageMagick \fBcomposite\fR. Requires
+\fBoverlay\fR (path to watermark image). Optional \fBgravity\fR (default: "center").
+Source file is preserved.
+.TP
+.B ocr
+Extract text from images/PDFs using \fBtesseract\fR. Optional \fBlanguage\fR
+(default: "eng"). Output is a .txt sidecar file.
+.TP
+.B encrypt
+Encrypt a file using \fBage\fR (default) or \fBgpg\fR. Requires \fBrecipient\fR.
+Source file is preserved.
+.TP
+.B decrypt
+Decrypt a file using \fBage\fR (default) or \fBgpg\fR. Optional \fBkey\fR for
+key file path. Source file is preserved.
+.TP
+.B upload
+Upload a file to cloud storage. Auto\-detects tool from URI scheme: s3:// uses
+\fBaws\fR, gs:// uses \fBgsutil\fR. Requires \fBremote\fR field (template\-expanded).
+Not undoable.
+.TP
+.B tag
+Apply macOS Finder tags to a file via \fBxattr\fR. Requires \fBtags\fR list.
+Not undoable.
 .SS "Template Variables"
-Destination paths support Go template syntax:
+Destination paths and action fields support Go template syntax:
 .TP
 .B {{.Name}}
 Filename without extension.
 .TP
 .B {{.Ext}}
 Extension including dot.
+.TP
+.B {{.Path}}
+Full source file path.
 .TP
 .B {{.Year}}\fR, \fB{{.Month}}\fR, \fB{{.Day}}
 From file modification time.
@@ -176,6 +244,85 @@ YYYY\-MM\-DD format.
 .TP
 .B {{.Time}}
 HH\-MM\-SS format.
+.SS "Action Configuration Fields"
+The following fields are available in the \fBaction:\fR block depending on
+the action type:
+.TP
+.B dest
+Destination path (template\-expanded). Used by move, copy, rename, compress,
+extract, symlink, checksum, convert, resize, watermark, ocr, encrypt, decrypt.
+.TP
+.B mode
+Permission string in octal (e.g., "0755"). Used by chmod.
+.TP
+.B algorithm
+Hash algorithm: "sha256" (default), "md5", or "sha1". Used by checksum.
+.TP
+.B command
+Shell command (template\-expanded, supports \fB{{.Path}}\fR). Used by exec.
+.TP
+.B title\fR, \fBmessage
+Notification title and body (template\-expanded). Used by notify.
+.TP
+.B tool
+External binary name. Used by convert (required), resize (default: "sips"),
+watermark (default: "composite"), ocr (default: "tesseract"), encrypt/decrypt
+(default: "age"), upload (auto\-detected from URI scheme).
+.TP
+.B args
+Extra arguments (template\-expanded). Used by convert. Use \fB{{.Dest}}\fR and
+\fB{{.Path}}\fR in the args string.
+.TP
+.B width\fR, \fBheight\fR, \fBpercentage
+Image dimensions for resize. Specify width, height, or percentage.
+.TP
+.B overlay\fR, \fBgravity
+Watermark overlay image path and placement (default: "center"). Common gravity
+values: center, north, south, east, west, northeast, northwest, southeast,
+southwest.
+.TP
+.B language
+Tesseract language code (default: "eng"). Used by ocr.
+.TP
+.B recipient
+Public key or key ID. Used by encrypt (required). For age: "age1...". For gpg:
+email or key ID.
+.TP
+.B key
+Key file path. Used by decrypt. For age: identity file. For gpg: keyring file.
+.TP
+.B tags
+List of macOS Finder tag names (e.g., [Red, Finance]). Used by tag.
+.TP
+.B remote
+Upload destination URI (template\-expanded). Used by upload. Supported schemes:
+s3:// (uses \fBaws\fR), gs:// (uses \fBgsutil\fR).
+.SS "External Tool Requirements"
+Some actions require external tools to be installed:
+.TP
+.B resize
+sips (built\-in on macOS) or ImageMagick convert.
+.TP
+.B watermark
+ImageMagick composite. Install: \fBbrew install imagemagick\fR.
+.TP
+.B convert
+User\-specified tool (e.g., ffmpeg, pandoc). Install as needed.
+.TP
+.B ocr
+tesseract. Install: \fBbrew install tesseract\fR.
+.TP
+.B encrypt\fR, \fBdecrypt
+age (default) or gpg. Install: \fBbrew install age\fR.
+.TP
+.B upload
+aws CLI (for s3://) or gsutil (for gs://). Install: \fBbrew install awscli\fR.
+.TP
+.B tag
+xattr (built\-in on macOS).
+.TP
+.B notify
+osascript (built\-in on macOS) or HTTP webhook (no tool needed).
 .SH FILES
 .TP
 .I ~/.config/sortie/config.yaml
@@ -231,6 +378,248 @@ Undo the last 3 actions:
 .nf
 $ sortie undo \-\-last 3
 .fi
+.PP
+Example rule using exec to strip EXIF data:
+.PP
+.nf
+rules:
+  \- name: strip\-exif
+    match:
+      extensions: [.jpg, .jpeg]
+    action:
+      type: exec
+      command: "exiftool \-all= '{{.Path}}'"
+.fi
+.PP
+Example rule to extract archives:
+.PP
+.nf
+rules:
+  \- name: extract\-archives
+    match:
+      extensions: [.zip, .tar.gz, .tgz]
+    action:
+      type: extract
+      dest: ~/Downloads/Extracted/{{.Name}}
+.fi
+.PP
+Example rule to encrypt sensitive files:
+.PP
+.nf
+rules:
+  \- name: encrypt\-sensitive
+    match:
+      glob: "confidential\-*"
+    action:
+      type: encrypt
+      recipient: "age1..."
+      dest: ~/Encrypted/{{.Name}}{{.Ext}}.age
+.fi
+.PP
+Example rule to upload to S3:
+.PP
+.nf
+rules:
+  \- name: backup\-to\-s3
+    match:
+      extensions: [.pdf]
+    action:
+      type: upload
+      remote: "s3://my\-bucket/docs/{{.Year}}/{{.Name}}{{.Ext}}"
+.fi
+.PP
+Create symlinks for config files:
+.PP
+.nf
+rules:
+  \- name: symlink\-configs
+    match:
+      glob: "*.conf"
+    action:
+      type: symlink
+      dest: ~/configs/{{.Name}}{{.Ext}}
+.fi
+.PP
+Hash large downloads:
+.PP
+.nf
+rules:
+  \- name: hash\-downloads
+    match:
+      min_size: 100MB
+    action:
+      type: checksum
+      algorithm: sha256
+.fi
+.PP
+Resize images using sips:
+.PP
+.nf
+rules:
+  \- name: resize\-photos
+    match:
+      extensions: [.jpg, .png]
+      min_size: 5MB
+    action:
+      type: resize
+      width: 1920
+      dest: ~/Pictures/Resized/{{.Name}}{{.Ext}}
+.fi
+.PP
+Convert video with ffmpeg:
+.PP
+.nf
+rules:
+  \- name: convert\-videos
+    match:
+      extensions: [.mov, .avi]
+    action:
+      type: convert
+      tool: ffmpeg
+      args: "\-i {{.Path}} \-c:v libx264 {{.Dest}}"
+      dest: ~/Videos/Converted/{{.Name}}.mp4
+.fi
+.PP
+Watermark photos:
+.PP
+.nf
+rules:
+  \- name: watermark\-photos
+    match:
+      extensions: [.jpg, .png]
+    action:
+      type: watermark
+      overlay: ~/watermark.png
+      gravity: southeast
+      dest: ~/Pictures/Watermarked/{{.Name}}{{.Ext}}
+.fi
+.PP
+OCR scanned documents:
+.PP
+.nf
+rules:
+  \- name: ocr\-scans
+    match:
+      extensions: [.png, .tiff]
+    action:
+      type: ocr
+      language: eng
+      dest: ~/Documents/OCR/{{.Name}}.txt
+.fi
+.PP
+Decrypt age\-encrypted files:
+.PP
+.nf
+rules:
+  \- name: decrypt\-incoming
+    match:
+      extensions: [.age]
+    action:
+      type: decrypt
+      key: ~/.age/key.txt
+      dest: ~/Decrypted/{{.Name}}
+.fi
+.PP
+Send a desktop notification when a PDF arrives:
+.PP
+.nf
+rules:
+  \- name: new\-pdf\-alert
+    match:
+      extensions: [.pdf]
+    action:
+      type: notify
+      title: "New PDF"
+      message: "{{.Name}}{{.Ext}} arrived in Downloads"
+.fi
+.PP
+Post to a webhook when a large file appears:
+.PP
+.nf
+rules:
+  \- name: large\-file\-webhook
+    match:
+      min_size: 1GB
+    action:
+      type: notify
+      title: "Large file"
+      message: "https://hooks.example.com/files"
+.fi
+.PP
+Make shell scripts executable:
+.PP
+.nf
+rules:
+  \- name: make\-scripts\-executable
+    match:
+      extensions: [.sh]
+    action:
+      type: chmod
+      mode: "0755"
+.fi
+.PP
+Tag PDF receipts in Finder:
+.PP
+.nf
+rules:
+  \- name: tag\-receipts
+    match:
+      regex: "(?i)receipt"
+      extensions: [.pdf]
+    action:
+      type: tag
+      tags: [Green, Finance]
+.fi
+.PP
+Compress old log files:
+.PP
+.nf
+rules:
+  \- name: compress\-logs
+    match:
+      extensions: [.log]
+      min_age: 7d
+    action:
+      type: compress
+      dest: ~/Archives/{{.Name}}{{.Ext}}.gz
+.fi
+.PP
+Copy invoices to a shared folder:
+.PP
+.nf
+rules:
+  \- name: share\-invoices
+    match:
+      glob: "invoice\-*"
+      extensions: [.pdf]
+    action:
+      type: copy
+      dest: ~/Shared/Invoices/{{.Name}}{{.Ext}}
+.fi
+.PP
+Rename screenshots with a date prefix:
+.PP
+.nf
+rules:
+  \- name: rename\-screenshots
+    match:
+      glob: "Screenshot*"
+    action:
+      type: rename
+      dest: {{.Date}}_{{.Name}}{{.Ext}}
+.fi
+.PP
+Delete temporary files older than 30 days:
+.PP
+.nf
+rules:
+  \- name: cleanup\-temp
+    match:
+      extensions: [.tmp, .bak]
+      min_age: 30d
+    action:
+      type: delete
+.fi
 .SH RUNNING AS A SERVICE
 On macOS, sortie can run as a launchd user agent to watch directories
 automatically at login.
@@ -248,13 +637,27 @@ that starts
 at login. Logs go to
 .IR ~/.config/sortie/logs/sortie.log .
 .PP
+The watch command monitors its own binary for changes. When you run
+.B make deploy\fR,
+the daemon detects the updated binary, exits gracefully, and launchd's
+.B KeepAlive
+automatically relaunches with the new version. No manual restart is needed
+after deploying a new build.
+.PP
 Manage the service:
 .PP
 .nf
-# Stop
+# Deploy (daemon auto\-restarts when it detects the new binary)
+$ make deploy
+
+# Manual stop
 $ launchctl unload ~/Library/LaunchAgents/com.msjurset.sortie.plist
 
-# Start
+# Manual start
+$ launchctl load ~/Library/LaunchAgents/com.msjurset.sortie.plist
+
+# Restart after config changes (binary unchanged, manual reload needed)
+$ launchctl unload ~/Library/LaunchAgents/com.msjurset.sortie.plist
 $ launchctl load ~/Library/LaunchAgents/com.msjurset.sortie.plist
 
 # Uninstall

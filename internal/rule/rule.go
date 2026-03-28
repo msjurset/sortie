@@ -37,17 +37,48 @@ type Match struct {
 type ActionType string
 
 const (
-	ActionMove     ActionType = "move"
-	ActionCopy     ActionType = "copy"
-	ActionRename   ActionType = "rename"
-	ActionDelete   ActionType = "delete"
-	ActionCompress ActionType = "compress"
+	ActionMove      ActionType = "move"
+	ActionCopy      ActionType = "copy"
+	ActionRename    ActionType = "rename"
+	ActionDelete    ActionType = "delete"
+	ActionCompress  ActionType = "compress"
+	ActionExtract   ActionType = "extract"
+	ActionSymlink   ActionType = "symlink"
+	ActionChmod     ActionType = "chmod"
+	ActionChecksum  ActionType = "checksum"
+	ActionExec      ActionType = "exec"
+	ActionNotify    ActionType = "notify"
+	ActionConvert   ActionType = "convert"
+	ActionResize    ActionType = "resize"
+	ActionWatermark ActionType = "watermark"
+	ActionOCR       ActionType = "ocr"
+	ActionEncrypt   ActionType = "encrypt"
+	ActionDecrypt   ActionType = "decrypt"
+	ActionUpload    ActionType = "upload"
+	ActionTag       ActionType = "tag"
 )
 
 // Action defines what to do with a matched file.
 type Action struct {
-	Type ActionType `yaml:"type"`
-	Dest string     `yaml:"dest,omitempty"`
+	Type       ActionType `yaml:"type"`
+	Dest       string     `yaml:"dest,omitempty"`
+	Mode       string     `yaml:"mode,omitempty"`       // chmod: permission string e.g. "0644"
+	Algorithm  string     `yaml:"algorithm,omitempty"`   // checksum: "sha256", "md5", "sha1"
+	Command    string     `yaml:"command,omitempty"`     // exec: shell command template
+	Title      string     `yaml:"title,omitempty"`       // notify: notification title
+	Message    string     `yaml:"message,omitempty"`     // notify: body text or webhook URL
+	Tool       string     `yaml:"tool,omitempty"`        // convert/resize/watermark/ocr/encrypt/decrypt: binary name
+	Args       string     `yaml:"args,omitempty"`        // convert/resize/watermark: extra arguments template
+	Width      int        `yaml:"width,omitempty"`       // resize: target width in pixels
+	Height     int        `yaml:"height,omitempty"`      // resize: target height in pixels
+	Percentage int        `yaml:"percentage,omitempty"`  // resize: scale percentage
+	Overlay    string     `yaml:"overlay,omitempty"`     // watermark: path to overlay image
+	Gravity    string     `yaml:"gravity,omitempty"`     // watermark: placement e.g. "center", "southeast"
+	Language   string     `yaml:"language,omitempty"`    // ocr: tesseract language code
+	Recipient  string     `yaml:"recipient,omitempty"`   // encrypt: age/gpg recipient
+	Key        string     `yaml:"key,omitempty"`         // decrypt: key file path
+	Tags       []string   `yaml:"tags,omitempty"`        // tag: macOS Finder tags
+	Remote     string     `yaml:"remote,omitempty"`      // upload: destination URI e.g. "s3://bucket/path"
 }
 
 // FileInfo wraps os.FileInfo with the full file path.

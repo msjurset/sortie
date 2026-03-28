@@ -93,7 +93,12 @@ func runRulesTest(cmd *cobra.Command, args []string) error {
 	fmt.Printf("File:   %s\n", fi.Info.Name())
 	fmt.Printf("Rule:   %s\n", matched.Name)
 	fmt.Printf("Action: %s\n", matched.Action.Type)
-	fmt.Printf("Dest:   %s\n", dest)
+	if dest != "" {
+		fmt.Printf("Dest:   %s\n", dest)
+	}
+	if extra := summarizeAction(matched.Action); extra != "" {
+		fmt.Printf("Detail: %s\n", extra)
+	}
 
 	return nil
 }
@@ -136,6 +141,94 @@ func summarizeMatch(m rule.Match) string {
 	}
 	if len(parts) == 0 {
 		return "*"
+	}
+	s := parts[0]
+	for _, p := range parts[1:] {
+		s += " " + p
+	}
+	return s
+}
+
+func summarizeAction(a rule.Action) string {
+	var parts []string
+
+	switch a.Type {
+	case rule.ActionChmod:
+		parts = append(parts, fmt.Sprintf("mode:%s", a.Mode))
+	case rule.ActionChecksum:
+		algo := a.Algorithm
+		if algo == "" {
+			algo = "sha256"
+		}
+		parts = append(parts, fmt.Sprintf("algorithm:%s", algo))
+	case rule.ActionExec:
+		parts = append(parts, fmt.Sprintf("command:%s", a.Command))
+	case rule.ActionNotify:
+		if a.Title != "" {
+			parts = append(parts, fmt.Sprintf("title:%s", a.Title))
+		}
+		if a.Message != "" {
+			parts = append(parts, fmt.Sprintf("message:%s", a.Message))
+		}
+	case rule.ActionConvert:
+		if a.Tool != "" {
+			parts = append(parts, fmt.Sprintf("tool:%s", a.Tool))
+		}
+		if a.Args != "" {
+			parts = append(parts, fmt.Sprintf("args:%s", a.Args))
+		}
+	case rule.ActionResize:
+		if a.Tool != "" {
+			parts = append(parts, fmt.Sprintf("tool:%s", a.Tool))
+		}
+		if a.Width > 0 {
+			parts = append(parts, fmt.Sprintf("width:%d", a.Width))
+		}
+		if a.Height > 0 {
+			parts = append(parts, fmt.Sprintf("height:%d", a.Height))
+		}
+		if a.Percentage > 0 {
+			parts = append(parts, fmt.Sprintf("pct:%d%%", a.Percentage))
+		}
+	case rule.ActionWatermark:
+		if a.Tool != "" {
+			parts = append(parts, fmt.Sprintf("tool:%s", a.Tool))
+		}
+		if a.Overlay != "" {
+			parts = append(parts, fmt.Sprintf("overlay:%s", a.Overlay))
+		}
+		if a.Gravity != "" {
+			parts = append(parts, fmt.Sprintf("gravity:%s", a.Gravity))
+		}
+	case rule.ActionOCR:
+		if a.Tool != "" {
+			parts = append(parts, fmt.Sprintf("tool:%s", a.Tool))
+		}
+		if a.Language != "" {
+			parts = append(parts, fmt.Sprintf("lang:%s", a.Language))
+		}
+	case rule.ActionEncrypt:
+		if a.Tool != "" {
+			parts = append(parts, fmt.Sprintf("tool:%s", a.Tool))
+		}
+		if a.Recipient != "" {
+			parts = append(parts, fmt.Sprintf("recipient:%s", a.Recipient))
+		}
+	case rule.ActionDecrypt:
+		if a.Tool != "" {
+			parts = append(parts, fmt.Sprintf("tool:%s", a.Tool))
+		}
+		if a.Key != "" {
+			parts = append(parts, fmt.Sprintf("key:%s", a.Key))
+		}
+	case rule.ActionUpload:
+		parts = append(parts, fmt.Sprintf("remote:%s", a.Remote))
+	case rule.ActionTag:
+		parts = append(parts, fmt.Sprintf("tags:%v", a.Tags))
+	}
+
+	if len(parts) == 0 {
+		return ""
 	}
 	s := parts[0]
 	for _, p := range parts[1:] {

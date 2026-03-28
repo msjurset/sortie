@@ -5,12 +5,12 @@ Intelligent file dispatcher — rule-based file routing for directories like `~/
 ## Features
 
 - **Rule-based matching** — match files by extension, glob, regex, size, age, or MIME type
-- **Multiple actions** — move, copy, rename, delete (to trash), compress (gzip)
+- **19 action types** — move, copy, rename, delete, compress, extract, symlink, chmod, checksum, exec, notify, convert, resize, watermark, ocr, encrypt, decrypt, upload, tag
 - **Hybrid config** — central `~/.config/sortie/config.yaml` plus per-directory `.sortie.yaml` overrides
 - **Watch mode** — real-time file monitoring with fsnotify and configurable debounce
 - **Dry-run mode** — preview what would happen before committing
 - **Undo** — reverse recent actions from the history log
-- **Template destinations** — use `{{.Year}}`, `{{.Month}}`, `{{.Name}}`, `{{.Ext}}` in dest paths
+- **Template destinations** — use `{{.Year}}`, `{{.Month}}`, `{{.Name}}`, `{{.Ext}}`, `{{.Path}}` in dest paths and action fields
 - **Trash management** — deleted files go to trash, not oblivion
 - **First-match-wins** — per-directory rules evaluate before global rules
 
@@ -139,6 +139,122 @@ rules:
     action:
       type: move
       dest: ~/LargeFiles
+
+  - name: extract-archives
+    match:
+      extensions: [.zip, .tar.gz, .tgz]
+    action:
+      type: extract
+      dest: ~/Downloads/Extracted/{{.Name}}
+
+  - name: make-scripts-executable
+    match:
+      extensions: [.sh]
+    action:
+      type: chmod
+      mode: "0755"
+
+  - name: strip-exif
+    match:
+      extensions: [.jpg, .jpeg]
+    action:
+      type: exec
+      command: "exiftool -all= '{{.Path}}'"
+
+  - name: new-pdf-alert
+    match:
+      extensions: [.pdf]
+    action:
+      type: notify
+      title: "New PDF"
+      message: "{{.Name}}{{.Ext}} arrived"
+
+  - name: encrypt-sensitive
+    match:
+      glob: "confidential-*"
+    action:
+      type: encrypt
+      recipient: "age1..."
+      dest: ~/Encrypted/{{.Name}}{{.Ext}}.age
+
+  - name: backup-to-s3
+    match:
+      extensions: [.pdf]
+    action:
+      type: upload
+      remote: "s3://my-bucket/docs/{{.Year}}/{{.Name}}{{.Ext}}"
+```
+
+### More Action Examples
+
+```yaml
+rules:
+  - name: symlink-dotfiles
+    match:
+      glob: "*.conf"
+    action:
+      type: symlink
+      dest: ~/configs/{{.Name}}{{.Ext}}
+
+  - name: hash-large-downloads
+    match:
+      min_size: 100MB
+    action:
+      type: checksum
+      algorithm: sha256
+
+  - name: convert-videos-to-mp4
+    match:
+      extensions: [.mov, .avi, .mkv]
+    action:
+      type: convert
+      tool: ffmpeg
+      args: "-i {{.Path}} -c:v libx264 -crf 23 {{.Dest}}"
+      dest: ~/Videos/Converted/{{.Name}}.mp4
+
+  - name: resize-photos
+    match:
+      extensions: [.jpg, .png]
+      min_size: 5MB
+    action:
+      type: resize
+      width: 1920
+      dest: ~/Pictures/Resized/{{.Name}}{{.Ext}}
+
+  - name: watermark-photos
+    match:
+      extensions: [.jpg, .png]
+      glob: "portfolio-*"
+    action:
+      type: watermark
+      overlay: ~/watermark.png
+      gravity: southeast
+      dest: ~/Pictures/Watermarked/{{.Name}}{{.Ext}}
+
+  - name: ocr-scans
+    match:
+      extensions: [.png, .tiff]
+      glob: "scan-*"
+    action:
+      type: ocr
+      language: eng
+      dest: ~/Documents/OCR/{{.Name}}.txt
+
+  - name: decrypt-incoming
+    match:
+      extensions: [.age]
+    action:
+      type: decrypt
+      key: ~/.age/key.txt
+      dest: ~/Decrypted/{{.Name}}
+
+  - name: tag-receipts
+    match:
+      regex: "(?i)receipt"
+      extensions: [.pdf]
+    action:
+      type: tag
+      tags: [Green, Finance]
 ```
 
 ### Per-Directory Config (`~/Downloads/.sortie.yaml`)
@@ -166,17 +282,61 @@ Per-directory rules take precedence over global rules. All match conditions use 
 | `min_age` / `max_age` | Age threshold | `30d`, `2h` |
 | `mime_type` | MIME type prefix | `image/`, `application/pdf` |
 
+### Action Types
+
+| Type | Description | Undoable | Extra Fields |
+|------|-------------|----------|--------------|
+| `move` | Move file to dest | Yes | `dest` |
+| `copy` | Copy file to dest | Yes | `dest` |
+| `rename` | Rename file | Yes | `dest` |
+| `delete` | Move to trash | Yes | — |
+| `compress` | Gzip and remove original | Yes | `dest` |
+| `extract` | Extract archive to dest dir | Yes | `dest` |
+| `symlink` | Create symlink at dest | Yes | `dest` |
+| `chmod` | Change permissions | Yes | `mode` |
+| `checksum` | Write hash sidecar | Yes | `algorithm`, `dest` |
+| `exec` | Run shell command | No | `command` |
+| `notify` | Desktop notification or webhook | No | `title`, `message` |
+| `convert` | Run external converter | Yes | `tool`, `args`, `dest` |
+| `resize` | Resize image | Yes | `width`, `height`, `percentage`, `tool`, `dest` |
+| `watermark` | Stamp image with overlay | Yes | `overlay`, `gravity`, `tool`, `dest` |
+| `ocr` | Extract text (tesseract) | Yes | `language`, `tool`, `dest` |
+| `encrypt` | Encrypt file (age/gpg) | Yes | `recipient`, `tool`, `dest` |
+| `decrypt` | Decrypt file (age/gpg) | Yes | `key`, `tool`, `dest` |
+| `upload` | Upload to cloud storage | No | `remote`, `tool` |
+| `tag` | Apply macOS Finder tags | No | `tags` |
+
 ### Template Variables
 
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `{{.Name}}` | Filename without extension | `report` |
 | `{{.Ext}}` | Extension with dot | `.pdf` |
+| `{{.Path}}` | Full source file path | `/Users/me/Downloads/report.pdf` |
 | `{{.Year}}` | 4-digit year | `2026` |
 | `{{.Month}}` | 2-digit month | `03` |
 | `{{.Day}}` | 2-digit day | `18` |
 | `{{.Date}}` | YYYY-MM-DD | `2026-03-18` |
 | `{{.Time}}` | HH-MM-SS | `14-30-00` |
+
+### External Tool Requirements
+
+Some action types shell out to external tools. Install only the tools you need:
+
+| Action | Default Tool | Install (macOS) | Alternatives |
+|--------|-------------|-----------------|--------------|
+| `resize` | `sips` | Built-in | `convert` (ImageMagick) |
+| `watermark` | `composite` | `brew install imagemagick` | — |
+| `convert` | (none, must set `tool`) | `brew install ffmpeg` | `convert`, `pandoc` |
+| `ocr` | `tesseract` | `brew install tesseract` | — |
+| `encrypt` | `age` | `brew install age` | `gpg` |
+| `decrypt` | `age` | `brew install age` | `gpg` |
+| `upload` | auto-detect from URI | `brew install awscli` | `gsutil` |
+| `tag` | `xattr` | Built-in (macOS) | — |
+| `notify` | `osascript` | Built-in (macOS) | HTTP webhook |
+| `extract` (.tar.xz) | `tar` | Built-in | — |
+
+Actions that require a missing tool will fail with a clear error message indicating which tool to install. The `tool` field can override the default for any action (e.g., `tool: gpg` instead of `age`).
 
 ## Running as a Service (macOS)
 
@@ -188,6 +348,8 @@ make install-launchd
 
 This creates a plist at `~/Library/LaunchAgents/com.msjurset.sortie.plist` that starts `sortie watch` at login and keeps it running.
 
+The watch command monitors its own binary for changes — after running `make deploy`, the daemon detects the new binary, exits gracefully, and launchd's `KeepAlive` automatically relaunches with the updated version. No manual restart needed for binary updates.
+
 ### Managing the service
 
 ```bash
@@ -197,13 +359,16 @@ sortie status
 # View logs
 tail -f ~/.config/sortie/logs/sortie.log
 
-# Stop the service
+# Deploy (daemon auto-restarts when it detects the new binary)
+make deploy
+
+# Manual stop
 launchctl unload ~/Library/LaunchAgents/com.msjurset.sortie.plist
 
-# Start the service
+# Manual start
 launchctl load ~/Library/LaunchAgents/com.msjurset.sortie.plist
 
-# Restart after config changes
+# Restart after config changes (binary didn't change, so manual reload needed)
 launchctl unload ~/Library/LaunchAgents/com.msjurset.sortie.plist
 launchctl load ~/Library/LaunchAgents/com.msjurset.sortie.plist
 

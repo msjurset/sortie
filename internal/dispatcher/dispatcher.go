@@ -73,6 +73,47 @@ func (d *Dispatcher) Dispatch(fi rule.FileInfo, r rule.Rule, dryRun bool) (*Resu
 	case rule.ActionCompress:
 		dest, err = doCompress(fi.Path, dest)
 		rec.Dest = dest
+	case rule.ActionExtract:
+		// Extract uses dest as a directory, not a file path — avoid
+		// ExpandTemplate's filename-appending behavior.
+		var extractDest string
+		extractDest, err = rule.ExpandString(r.Action.Dest, fi)
+		if err == nil {
+			err = doExtract(fi.Path, extractDest)
+			rec.Dest = extractDest
+		}
+	case rule.ActionSymlink:
+		err = doSymlink(fi.Path, dest)
+	case rule.ActionChmod:
+		var oldMode string
+		oldMode, err = doChmod(fi.Path, r.Action.Mode)
+		rec.Dest = oldMode
+	case rule.ActionChecksum:
+		dest, err = doChecksum(fi.Path, dest, r.Action.Algorithm)
+		rec.Dest = dest
+	case rule.ActionExec:
+		err = doExec(fi, r.Action)
+	case rule.ActionNotify:
+		err = doNotify(fi, r.Action)
+	case rule.ActionConvert:
+		err = doConvert(fi, r.Action, dest)
+	case rule.ActionResize:
+		err = doResize(fi, r.Action, dest)
+	case rule.ActionWatermark:
+		err = doWatermark(fi, r.Action, dest)
+	case rule.ActionOCR:
+		dest, err = doOCR(fi, r.Action, dest)
+		rec.Dest = dest
+	case rule.ActionEncrypt:
+		err = doEncrypt(fi, r.Action, dest)
+	case rule.ActionDecrypt:
+		err = doDecrypt(fi, r.Action, dest)
+	case rule.ActionUpload:
+		err = doUpload(fi, r.Action)
+		rec.Dest = r.Action.Remote
+	case rule.ActionTag:
+		err = doTag(fi, r.Action)
+		rec.Dest = ""
 	default:
 		err = fmt.Errorf("unknown action %q", r.Action.Type)
 	}
@@ -120,6 +161,16 @@ func (d *Dispatcher) Undo(rec history.Record) error {
 		if err := doDecompress(rec.Dest, rec.Src); err != nil {
 			return err
 		}
+		return os.Remove(rec.Dest)
+	case "extract":
+		return os.RemoveAll(rec.Dest)
+	case "symlink":
+		return os.Remove(rec.Dest)
+	case "chmod":
+		// rec.Dest holds the original mode string
+		_, err := doChmod(rec.Src, rec.Dest)
+		return err
+	case "checksum", "convert", "resize", "watermark", "ocr", "encrypt", "decrypt":
 		return os.Remove(rec.Dest)
 	default:
 		return fmt.Errorf("cannot undo action %q", rec.Action)

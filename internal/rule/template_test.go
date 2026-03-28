@@ -76,3 +76,49 @@ func TestExpandTemplateConflictResolution(t *testing.T) {
 		t.Errorf("expected conflict resolution suffix _001, got %q", got)
 	}
 }
+
+func TestExpandString(t *testing.T) {
+	dir := t.TempDir()
+	modTime := time.Date(2026, 3, 18, 14, 30, 45, 0, time.UTC)
+
+	fi := testFile(t, dir, "report.pdf", 1024, modTime)
+
+	tests := []struct {
+		name     string
+		template string
+		want     string
+	}{
+		{
+			name:     "path variable",
+			template: "cp '{{.Path}}' /backup/",
+			want:     "cp '" + fi.Path + "' /backup/",
+		},
+		{
+			name:     "name and ext",
+			template: "{{.Name}}{{.Ext}}",
+			want:     "report.pdf",
+		},
+		{
+			name:     "date variables",
+			template: "{{.Year}}-{{.Month}}-{{.Day}}",
+			want:     "2026-03-18",
+		},
+		{
+			name:     "empty template",
+			template: "",
+			want:     "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ExpandString(tt.template, fi)
+			if err != nil {
+				t.Fatalf("ExpandString() error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("ExpandString() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

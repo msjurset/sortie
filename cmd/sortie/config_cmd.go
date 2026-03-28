@@ -128,6 +128,119 @@ rules:
     action:
       type: move
       dest: ~/Downloads/LargeFiles
+
+  # --- Additional action types ---
+
+  # - name: extract-archives
+  #   match:
+  #     extensions: [.zip, .tar.gz, .tgz]
+  #   action:
+  #     type: extract
+  #     dest: ~/Downloads/Extracted/{{.Name}}
+
+  # - name: make-executable
+  #   match:
+  #     extensions: [.sh]
+  #   action:
+  #     type: chmod
+  #     mode: "0755"
+
+  # - name: hash-large-downloads
+  #   match:
+  #     min_size: 100MB
+  #   action:
+  #     type: checksum
+  #     algorithm: sha256
+
+  # - name: symlink-configs
+  #   match:
+  #     glob: "*.conf"
+  #   action:
+  #     type: symlink
+  #     dest: ~/configs/{{.Name}}{{.Ext}}
+
+  # - name: strip-exif
+  #   match:
+  #     extensions: [.jpg, .jpeg]
+  #   action:
+  #     type: exec
+  #     command: "exiftool -all= '{{.Path}}'"
+
+  # - name: new-pdf-alert
+  #   match:
+  #     extensions: [.pdf]
+  #   action:
+  #     type: notify
+  #     title: "New PDF"
+  #     message: "{{.Name}}{{.Ext}} arrived"
+
+  # - name: convert-videos
+  #   match:
+  #     extensions: [.mov, .avi]
+  #   action:
+  #     type: convert
+  #     tool: ffmpeg
+  #     args: "-i {{.Path}} -c:v libx264 {{.Dest}}"
+  #     dest: ~/Videos/Converted/{{.Name}}.mp4
+
+  # - name: resize-photos
+  #   match:
+  #     extensions: [.jpg, .png]
+  #     min_size: 5MB
+  #   action:
+  #     type: resize
+  #     width: 1920
+  #     dest: ~/Pictures/Resized/{{.Name}}{{.Ext}}
+
+  # - name: watermark-photos
+  #   match:
+  #     extensions: [.jpg, .png]
+  #     glob: "portfolio-*"
+  #   action:
+  #     type: watermark
+  #     overlay: ~/watermark.png
+  #     gravity: southeast
+  #     dest: ~/Pictures/Watermarked/{{.Name}}{{.Ext}}
+
+  # - name: ocr-scans
+  #   match:
+  #     extensions: [.png, .tiff]
+  #     glob: "scan-*"
+  #   action:
+  #     type: ocr
+  #     language: eng
+  #     dest: ~/Documents/OCR/{{.Name}}.txt
+
+  # - name: encrypt-sensitive
+  #   match:
+  #     glob: "confidential-*"
+  #   action:
+  #     type: encrypt
+  #     recipient: "age1..."
+  #     dest: ~/Encrypted/{{.Name}}{{.Ext}}.age
+
+  # - name: decrypt-incoming
+  #   match:
+  #     extensions: [.age]
+  #   action:
+  #     type: decrypt
+  #     key: ~/.age/key.txt
+  #     dest: ~/Decrypted/{{.Name}}
+
+  # - name: backup-to-s3
+  #   match:
+  #     extensions: [.pdf]
+  #   action:
+  #     type: upload
+  #     remote: "s3://my-bucket/documents/{{.Year}}/{{.Month}}/{{.Name}}{{.Ext}}"
+
+  # - name: tag-invoices
+  #   match:
+  #     regex: "(?i)invoice"
+  #     extensions: [.pdf]
+  #   action:
+  #     type: tag
+  #     tags: [Red, Finance]
 `
 
 	if err := os.WriteFile(path, []byte(starter), 0o644); err != nil {
