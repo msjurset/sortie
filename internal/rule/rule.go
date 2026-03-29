@@ -12,12 +12,26 @@ import (
 	"time"
 )
 
-// Rule defines a file matching rule and its associated action.
+// Rule defines a file matching rule and its associated action(s).
 type Rule struct {
-	Name     string `yaml:"name"`
-	Match    Match  `yaml:"match"`
-	Action   Action `yaml:"action"`
-	Priority int    `yaml:"priority,omitempty"`
+	Name     string   `yaml:"name"`
+	Match    Match    `yaml:"match"`
+	Action   Action   `yaml:"action,omitempty"`  // single action (backwards-compatible)
+	Actions  []Action `yaml:"actions,omitempty"` // action chain (evaluated in order)
+	Priority int      `yaml:"priority,omitempty"`
+}
+
+// ResolvedActions returns the list of actions to execute. If Actions is set,
+// it is returned directly. Otherwise, the single Action field is wrapped in a
+// one-element slice. This allows both singular and plural forms in YAML.
+func (r *Rule) ResolvedActions() []Action {
+	if len(r.Actions) > 0 {
+		return r.Actions
+	}
+	if r.Action.Type != "" {
+		return []Action{r.Action}
+	}
+	return nil
 }
 
 // Match defines the conditions for a rule. All specified conditions must be
@@ -54,8 +68,11 @@ const (
 	ActionOCR       ActionType = "ocr"
 	ActionEncrypt   ActionType = "encrypt"
 	ActionDecrypt   ActionType = "decrypt"
-	ActionUpload    ActionType = "upload"
-	ActionTag       ActionType = "tag"
+	ActionUpload        ActionType = "upload"
+	ActionTag           ActionType = "tag"
+	ActionOpen          ActionType = "open"
+	ActionDeduplicate   ActionType = "deduplicate"
+	ActionUnquarantine  ActionType = "unquarantine"
 )
 
 // Action defines what to do with a matched file.
@@ -77,8 +94,10 @@ type Action struct {
 	Language   string     `yaml:"language,omitempty"`    // ocr: tesseract language code
 	Recipient  string     `yaml:"recipient,omitempty"`   // encrypt: age/gpg recipient
 	Key        string     `yaml:"key,omitempty"`         // decrypt: key file path
-	Tags       []string   `yaml:"tags,omitempty"`        // tag: macOS Finder tags
-	Remote     string     `yaml:"remote,omitempty"`      // upload: destination URI e.g. "s3://bucket/path"
+	Tags        []string `yaml:"tags,omitempty"`         // tag: macOS Finder tags
+	Remote      string   `yaml:"remote,omitempty"`       // upload: destination URI e.g. "s3://bucket/path"
+	App         string   `yaml:"app,omitempty"`          // open: application name e.g. "VLC", "Preview"
+	OnDuplicate string   `yaml:"on_duplicate,omitempty"` // deduplicate: "skip" (default) or "delete"
 }
 
 // FileInfo wraps os.FileInfo with the full file path.

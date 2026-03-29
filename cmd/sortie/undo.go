@@ -43,7 +43,7 @@ func runUndo(cmd *cobra.Command, args []string) error {
 	var targets []history.Record
 
 	if len(args) == 1 {
-		// Undo specific ID
+		// Undo specific ID (and its chain if part of one)
 		id := args[0]
 		for _, r := range records {
 			if r.ID == id {
@@ -56,16 +56,27 @@ func runUndo(cmd *cobra.Command, args []string) error {
 		}
 	} else {
 		// Undo last N non-undone, non-errored actions
+		seen := map[string]bool{} // track chain IDs already collected
 		for _, r := range records {
 			if r.Undone || r.Error != "" {
 				continue
 			}
+			if r.ChainID != "" && seen[r.ChainID] {
+				continue // already counted this chain
+			}
 			targets = append(targets, r)
+			if r.ChainID != "" {
+				seen[r.ChainID] = true
+			}
 			if len(targets) >= undoFlags.last {
 				break
 			}
 		}
 	}
+
+	// Expand chain targets: if any target is part of a chain, include all
+	// non-undone records in that chain (in reverse order for proper undo).
+	targets = expandChains(targets, records)
 
 	if len(targets) == 0 {
 		fmt.Println("No actions available to undo.")
@@ -97,4 +108,34 @@ func runUndo(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// expandChains replaces chain member targets with all non-undone records
+// from their chain, ordered newest-first (for correct reverse undo).
+func expandChains(targets, allRecords []history.Record) []history.Record {
+	chainIDs := map[string]bool{}
+	singleTargets := []history.Record{}
+
+	for _, t := range targets {
+		if t.ChainID != "" {
+			chainIDs[t.ChainID] = true
+		} else {
+			singleTargets = append(singleTargets, t)
+		}
+	}
+
+	if len(chainIDs) == 0 {
+		return targets
+	}
+
+	// Collect all chain records (allRecords is newest-first, which is the
+	// correct undo order — reverse of execution).
+	var expanded []history.Record
+	for _, r := range allRecords {
+		if r.ChainID != "" && chainIDs[r.ChainID] && !r.Undone && r.Error == "" {
+			expanded = append(expanded, r)
+		}
+	}
+
+	return append(expanded, singleTargets...)
 }

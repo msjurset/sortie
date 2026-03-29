@@ -11,6 +11,7 @@ _sortie() {
         'config:Show configuration'
         'status:Show watcher status'
         'trash:Manage the trash directory'
+        'validate:Validate rules for errors and potential problems'
         'man:Display the manual page'
         'help:Help about any command'
         'completion:Generate the autocompletion script for the specified shell'
@@ -60,11 +61,13 @@ _sortie() {
             )
             _arguments -C \
                 '(- *)--help[Show help]' \
+                '--global[Include global rules]' \
                 '1: :->subcmd' \
                 '*:: :->subargs'
             case $state in
             subcmd)
                 _describe 'rules command' rules_commands
+                _directories
                 ;;
             subargs)
                 case $words[1] in
@@ -72,6 +75,9 @@ _sortie() {
                     _arguments \
                         '(- *)--help[Show help]' \
                         '1:file:_files'
+                    ;;
+                *)
+                    _directories
                     ;;
                 esac
                 ;;
@@ -113,6 +119,12 @@ _sortie() {
                 _arguments '(- *)--help[Show help]'
                 ;;
             esac
+            ;;
+        validate)
+            _arguments \
+                '(- *)--help[Show help]' \
+                '--global[Include global rules]' \
+                '*:directory:_directories'
             ;;
         status|man)
             _arguments '(- *)--help[Show help]'

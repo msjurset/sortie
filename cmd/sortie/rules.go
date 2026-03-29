@@ -3,16 +3,22 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"text/tabwriter"
 
+	"github.com/msjurset/sortie/internal/config"
 	"github.com/msjurset/sortie/internal/rule"
 	"github.com/spf13/cobra"
 )
 
+var rulesFlags struct {
+	global bool
+}
+
 var rulesCmd = &cobra.Command{
-	Use:   "rules",
+	Use:   "rules [directory...]",
 	Short: "List configured rules",
-	Args:  cobra.NoArgs,
 	RunE:  runRules,
 }
 
@@ -24,11 +30,39 @@ var rulesTestCmd = &cobra.Command{
 }
 
 func init() {
+	rulesCmd.Flags().BoolVar(&rulesFlags.global, "global", false, "include global rules when listing specific directories")
 	rulesCmd.AddCommand(rulesTestCmd)
 	rootCmd.AddCommand(rulesCmd)
 }
 
 func runRules(cmd *cobra.Command, args []string) error {
+	if len(args) > 0 {
+		for _, dir := range args {
+			dir = expandHome(dir)
+			if abs, err := filepath.Abs(dir); err == nil {
+				dir = abs
+			}
+
+			dc, err := config.LoadDirConfig(dir)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  error loading %s: %v\n", dir, err)
+				continue
+			}
+
+			if dc != nil && len(dc.Rules) > 0 {
+				fmt.Printf("%s:\n", dir)
+				printRules(dc.Rules)
+			} else {
+				fmt.Printf("%s: no per-directory rules\n", dir)
+			}
+		}
+		if rulesFlags.global && len(cfg.Rules) > 0 {
+			fmt.Println("\nGlobal rules:")
+			printRules(cfg.Rules)
+		}
+		return nil
+	}
+
 	if len(cfg.Rules) > 0 {
 		fmt.Println("Global rules:")
 		printRules(cfg.Rules)
@@ -89,15 +123,23 @@ func runRulesTest(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	dest, _ := rule.ExpandTemplate(matched.Action.Dest, fi)
 	fmt.Printf("File:   %s\n", fi.Info.Name())
 	fmt.Printf("Rule:   %s\n", matched.Name)
-	fmt.Printf("Action: %s\n", matched.Action.Type)
-	if dest != "" {
-		fmt.Printf("Dest:   %s\n", dest)
-	}
-	if extra := summarizeAction(matched.Action); extra != "" {
-		fmt.Printf("Detail: %s\n", extra)
+
+	actions := matched.ResolvedActions()
+	for i, a := range actions {
+		prefix := "Action"
+		if len(actions) > 1 {
+			prefix = fmt.Sprintf("Action[%d]", i+1)
+		}
+		fmt.Printf("%s: %s\n", prefix, a.Type)
+		if a.Dest != "" {
+			dest, _ := rule.ExpandTemplate(a.Dest, fi)
+			fmt.Printf("  Dest:   %s\n", dest)
+		}
+		if extra := summarizeAction(a); extra != "" {
+			fmt.Printf("  Detail: %s\n", extra)
+		}
 	}
 
 	return nil
@@ -108,7 +150,20 @@ func printRules(rules []rule.Rule) {
 	fmt.Fprintln(w, "  NAME\tACTION\tMATCH\tDEST")
 	for _, r := range rules {
 		match := summarizeMatch(r.Match)
-		fmt.Fprintf(w, "  %s\t%s\t%s\t%s\n", r.Name, r.Action.Type, match, r.Action.Dest)
+		actions := r.ResolvedActions()
+		if len(actions) <= 1 {
+			a := r.Action
+			if len(actions) == 1 {
+				a = actions[0]
+			}
+			fmt.Fprintf(w, "  %s\t%s\t%s\t%s\n", r.Name, a.Type, match, a.Dest)
+		} else {
+			types := make([]string, len(actions))
+			for i, a := range actions {
+				types[i] = string(a.Type)
+			}
+			fmt.Fprintf(w, "  %s\t%s\t%s\t(chain)\n", r.Name, strings.Join(types, " → "), match)
+		}
 	}
 	w.Flush()
 }
@@ -225,6 +280,14 @@ func summarizeAction(a rule.Action) string {
 		parts = append(parts, fmt.Sprintf("remote:%s", a.Remote))
 	case rule.ActionTag:
 		parts = append(parts, fmt.Sprintf("tags:%v", a.Tags))
+	case rule.ActionOpen:
+		if a.App != "" {
+			parts = append(parts, fmt.Sprintf("app:%s", a.App))
+		}
+	case rule.ActionDeduplicate:
+		if a.OnDuplicate != "" {
+			parts = append(parts, fmt.Sprintf("on_duplicate:%s", a.OnDuplicate))
+		}
 	}
 
 	if len(parts) == 0 {

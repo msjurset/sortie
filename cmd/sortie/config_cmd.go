@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -51,8 +52,17 @@ func runConfigShow(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("\nGlobal rules: %d\n", len(cfg.Rules))
-	for _, rule := range cfg.Rules {
-		fmt.Printf("  %s (%s)\n", rule.Name, rule.Action.Type)
+	for _, r := range cfg.Rules {
+		actions := r.ResolvedActions()
+		if len(actions) <= 1 {
+			fmt.Printf("  %s (%s)\n", r.Name, r.Action.Type)
+		} else {
+			types := make([]string, len(actions))
+			for i, a := range actions {
+				types[i] = string(a.Type)
+			}
+			fmt.Printf("  %s (%s)\n", r.Name, strings.Join(types, " → "))
+		}
 	}
 
 	return nil
@@ -241,6 +251,57 @@ rules:
   #   action:
   #     type: tag
   #     tags: [Red, Finance]
+
+  # - name: open-dmg
+  #   match:
+  #     extensions: [.dmg]
+  #   action:
+  #     type: open
+
+  # - name: open-videos-vlc
+  #   match:
+  #     extensions: [.mkv, .avi]
+  #   action:
+  #     type: open
+  #     app: VLC
+
+  # - name: dedup-downloads
+  #   match:
+  #     extensions: [.pdf, .zip]
+  #   action:
+  #     type: deduplicate
+  #     dest: ~/Documents/{{.Name}}{{.Ext}}
+  #     on_duplicate: skip
+
+  # - name: unquarantine-trusted
+  #   match:
+  #     extensions: [.dmg, .pkg]
+  #     glob: "trusted-*"
+  #   action:
+  #     type: unquarantine
+
+  # --- Action chaining (multiple actions per rule) ---
+
+  # - name: sort-and-notify
+  #   match:
+  #     extensions: [.pdf]
+  #   actions:
+  #     - type: notify
+  #       title: "New PDF"
+  #       message: "{{.Name}}{{.Ext}} arrived"
+  #     - type: move
+  #       dest: ~/Documents/PDFs/{{.Year}}/{{.Name}}{{.Ext}}
+
+  # - name: move-chmod-tag
+  #   match:
+  #     extensions: [.sh]
+  #   actions:
+  #     - type: move
+  #       dest: ~/Scripts/{{.Name}}{{.Ext}}
+  #     - type: chmod
+  #       mode: "0755"
+  #     - type: tag
+  #       tags: [Green, Scripts]
 `
 
 	if err := os.WriteFile(path, []byte(starter), 0o644); err != nil {

@@ -2,7 +2,7 @@ _sortie() {
     local cur prev words cword
     _init_completion || return
 
-    local commands="scan watch history undo rules config status trash man help completion"
+    local commands="scan watch history undo rules config status trash validate man help completion"
     local global_flags="--help --version --config --verbose -v"
 
     if [[ $cword -eq 1 ]]; then
@@ -38,10 +38,14 @@ _sortie() {
         fi
         ;;
     rules)
-        if [[ $cword -eq 2 ]]; then
-            COMPREPLY=($(compgen -W "test" -- "$cur"))
+        if [[ "$cur" == -* ]]; then
+            COMPREPLY=($(compgen -W "--global --help" -- "$cur"))
+        elif [[ $cword -eq 2 ]]; then
+            COMPREPLY=($(compgen -W "test" -- "$cur") $(compgen -d -- "$cur"))
         elif [[ "${words[2]}" == "test" ]]; then
             COMPREPLY=($(compgen -f -- "$cur"))
+        else
+            COMPREPLY=($(compgen -d -- "$cur"))
         fi
         ;;
     config)
@@ -52,6 +56,13 @@ _sortie() {
     trash)
         if [[ $cword -eq 2 ]]; then
             COMPREPLY=($(compgen -W "purge" -- "$cur"))
+        fi
+        ;;
+    validate)
+        if [[ "$cur" == -* ]]; then
+            COMPREPLY=($(compgen -W "--global --help" -- "$cur"))
+        else
+            COMPREPLY=($(compgen -d -- "$cur"))
         fi
         ;;
     completion)

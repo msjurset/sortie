@@ -20,6 +20,7 @@ type Record struct {
 	Dest      string    `json:"dest,omitempty"`
 	Undone    bool      `json:"undone,omitempty"`
 	Error     string    `json:"error,omitempty"`
+	ChainID   string    `json:"chain_id,omitempty"` // links actions in a chain
 }
 
 // Store reads and writes dispatch history as JSON Lines.

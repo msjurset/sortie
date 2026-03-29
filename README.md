@@ -5,13 +5,14 @@ Intelligent file dispatcher — rule-based file routing for directories like `~/
 ## Features
 
 - **Rule-based matching** — match files by extension, glob, regex, size, age, or MIME type
-- **19 action types** — move, copy, rename, delete, compress, extract, symlink, chmod, checksum, exec, notify, convert, resize, watermark, ocr, encrypt, decrypt, upload, tag
+- **22 action types** — move, copy, rename, delete, compress, extract, symlink, chmod, checksum, exec, notify, convert, resize, watermark, ocr, encrypt, decrypt, upload, tag, open, deduplicate, unquarantine
 - **Hybrid config** — central `~/.config/sortie/config.yaml` plus per-directory `.sortie.yaml` overrides
 - **Watch mode** — real-time file monitoring with fsnotify and configurable debounce
 - **Dry-run mode** — preview what would happen before committing
 - **Undo** — reverse recent actions from the history log
 - **Template destinations** — use `{{.Year}}`, `{{.Month}}`, `{{.Name}}`, `{{.Ext}}`, `{{.Path}}` in dest paths and action fields
 - **Trash management** — deleted files go to trash, not oblivion
+- **Action chaining** — run multiple actions per rule in sequence (e.g., notify then move)
 - **First-match-wins** — per-directory rules evaluate before global rules
 
 ## Install
@@ -36,7 +37,7 @@ sortie [command] [flags]
 | `watch` | Watch directories and dispatch files in real time |
 | `history` | Show action history |
 | `undo [id]` | Reverse recent dispatch actions |
-| `rules` | List configured rules |
+| `rules [directory...]` | List configured rules |
 | `rules test <file>` | Show which rule matches a file |
 | `config` | Show resolved configuration |
 | `config init` | Create a starter config file |
@@ -44,6 +45,7 @@ sortie [command] [flags]
 | `status` | Show watcher daemon status |
 | `trash` | List files in trash |
 | `trash purge` | Permanently delete all trashed files |
+| `validate [directory...]` | Check rules for errors and potential problems |
 | `man` | Display manual page |
 
 ### Global Flags
@@ -78,6 +80,18 @@ sortie [command] [flags]
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--last` | `1` | Number of recent actions to undo |
+
+### Rules Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--global` | `false` | Include global rules when listing specific directories |
+
+### Validate Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--global` | `false` | Include global rules when validating specific directories |
 
 ### Examples
 
@@ -255,6 +269,34 @@ rules:
     action:
       type: tag
       tags: [Green, Finance]
+
+  - name: open-dmg
+    match:
+      extensions: [.dmg]
+    action:
+      type: open
+
+  - name: open-videos-vlc
+    match:
+      extensions: [.mkv, .avi]
+    action:
+      type: open
+      app: VLC
+
+  - name: dedup-downloads
+    match:
+      extensions: [.pdf, .zip]
+    action:
+      type: deduplicate
+      dest: ~/Documents/{{.Name}}{{.Ext}}
+      on_duplicate: skip
+
+  - name: unquarantine-trusted
+    match:
+      extensions: [.dmg, .pkg]
+      glob: "trusted-*"
+    action:
+      type: unquarantine
 ```
 
 ### Per-Directory Config (`~/Downloads/.sortie.yaml`)
@@ -270,6 +312,36 @@ rules:
 ```
 
 Per-directory rules take precedence over global rules. All match conditions use AND logic. First matching rule wins.
+
+### Action Chaining
+
+Rules can specify multiple actions using `actions:` (plural) instead of `action:` (singular). Actions execute in order, and if a move or rename changes the file's location, subsequent actions operate on the file at its new path.
+
+```yaml
+rules:
+  - name: sort-and-notify
+    match:
+      extensions: [.pdf]
+    actions:
+      - type: notify
+        title: "New PDF"
+        message: "{{.Name}}{{.Ext}} arrived"
+      - type: move
+        dest: ~/Documents/PDFs/{{.Year}}/{{.Name}}{{.Ext}}
+
+  - name: move-chmod-tag
+    match:
+      extensions: [.sh]
+    actions:
+      - type: move
+        dest: ~/Scripts/{{.Name}}{{.Ext}}
+      - type: chmod
+        mode: "0755"
+      - type: tag
+        tags: [Green, Scripts]
+```
+
+If any action in the chain fails, the chain stops. Each action in a chain is recorded separately in history with a shared chain ID, so `sortie undo` reverses all actions in a chain together. The singular `action:` form continues to work for single-action rules.
 
 ### Match Conditions
 
@@ -305,6 +377,9 @@ Per-directory rules take precedence over global rules. All match conditions use 
 | `decrypt` | Decrypt file (age/gpg) | Yes | `key`, `tool`, `dest` |
 | `upload` | Upload to cloud storage | No | `remote`, `tool` |
 | `tag` | Apply macOS Finder tags | No | `tags` |
+| `open` | Open file with default or specified app | No | `app` |
+| `deduplicate` | Move to dest if not a duplicate (by hash) | Partial | `dest`, `on_duplicate` |
+| `unquarantine` | Remove macOS quarantine xattr | No | — |
 
 ### Template Variables
 
@@ -335,6 +410,8 @@ Some action types shell out to external tools. Install only the tools you need:
 | `tag` | `xattr` | Built-in (macOS) | — |
 | `notify` | `osascript` | Built-in (macOS) | HTTP webhook |
 | `extract` (.tar.xz) | `tar` | Built-in | — |
+| `open` | `open` | Built-in (macOS) | — |
+| `unquarantine` | `xattr` | Built-in (macOS) | — |
 
 Actions that require a missing tool will fail with a clear error message indicating which tool to install. The `tool` field can override the default for any action (e.g., `tool: gpg` instead of `age`).
 

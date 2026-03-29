@@ -2,11 +2,14 @@ package dispatcher
 
 import (
 	"compress/gzip"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/msjurset/sortie/internal/history"
 	"github.com/msjurset/sortie/internal/rule"
@@ -41,26 +44,66 @@ type Result struct {
 	DryRun bool
 }
 
-// Dispatch applies a rule's action to a file. In dry-run mode, no changes are
-// made but the planned action is returned.
+// Dispatch applies a rule's action(s) to a file. For rules with multiple
+// actions (action chaining), each action is executed in order and linked by
+// a shared ChainID in the history. If any action fails, the chain stops.
+// In dry-run mode, no changes are made but the planned actions are returned.
 func (d *Dispatcher) Dispatch(fi rule.FileInfo, r rule.Rule, dryRun bool) (*Result, error) {
-	dest, err := rule.ExpandTemplate(r.Action.Dest, fi)
+	actions := r.ResolvedActions()
+	if len(actions) == 0 {
+		return nil, fmt.Errorf("rule %q has no actions", r.Name)
+	}
+
+	// Single action — no chain overhead
+	if len(actions) == 1 {
+		return d.dispatchAction(fi, r.Name, actions[0], "", dryRun)
+	}
+
+	// Multiple actions — generate a shared chain ID
+	chainID := newChainID()
+	var lastResult *Result
+	for _, action := range actions {
+		result, err := d.dispatchAction(fi, r.Name, action, chainID, dryRun)
+		if err != nil {
+			return nil, err
+		}
+		lastResult = result
+
+		// If the action moved/renamed the file, update fi.Path for the next
+		// action in the chain so it operates on the file's new location.
+		if !dryRun && result.Record.Dest != "" {
+			switch action.Type {
+			case rule.ActionMove, rule.ActionRename:
+				newFi, statErr := rule.NewFileInfo(result.Record.Dest)
+				if statErr == nil {
+					fi = newFi
+				}
+			}
+		}
+	}
+	return lastResult, nil
+}
+
+// dispatchAction executes a single action against a file.
+func (d *Dispatcher) dispatchAction(fi rule.FileInfo, ruleName string, action rule.Action, chainID string, dryRun bool) (*Result, error) {
+	dest, err := rule.ExpandTemplate(action.Dest, fi)
 	if err != nil {
 		return nil, fmt.Errorf("expanding template: %w", err)
 	}
 
 	rec := history.Record{
-		RuleName: r.Name,
-		Action:   string(r.Action.Type),
+		RuleName: ruleName,
+		Action:   string(action.Type),
 		Src:      fi.Path,
 		Dest:     dest,
+		ChainID:  chainID,
 	}
 
 	if dryRun {
 		return &Result{Record: rec, DryRun: true}, nil
 	}
 
-	switch r.Action.Type {
+	switch action.Type {
 	case rule.ActionMove:
 		err = doMove(fi.Path, dest)
 	case rule.ActionCopy:
@@ -74,10 +117,8 @@ func (d *Dispatcher) Dispatch(fi rule.FileInfo, r rule.Rule, dryRun bool) (*Resu
 		dest, err = doCompress(fi.Path, dest)
 		rec.Dest = dest
 	case rule.ActionExtract:
-		// Extract uses dest as a directory, not a file path — avoid
-		// ExpandTemplate's filename-appending behavior.
 		var extractDest string
-		extractDest, err = rule.ExpandString(r.Action.Dest, fi)
+		extractDest, err = rule.ExpandString(action.Dest, fi)
 		if err == nil {
 			err = doExtract(fi.Path, extractDest)
 			rec.Dest = extractDest
@@ -86,46 +127,68 @@ func (d *Dispatcher) Dispatch(fi rule.FileInfo, r rule.Rule, dryRun bool) (*Resu
 		err = doSymlink(fi.Path, dest)
 	case rule.ActionChmod:
 		var oldMode string
-		oldMode, err = doChmod(fi.Path, r.Action.Mode)
+		oldMode, err = doChmod(fi.Path, action.Mode)
 		rec.Dest = oldMode
 	case rule.ActionChecksum:
-		dest, err = doChecksum(fi.Path, dest, r.Action.Algorithm)
+		dest, err = doChecksum(fi.Path, dest, action.Algorithm)
 		rec.Dest = dest
 	case rule.ActionExec:
-		err = doExec(fi, r.Action)
+		err = doExec(fi, action)
 	case rule.ActionNotify:
-		err = doNotify(fi, r.Action)
+		err = doNotify(fi, action)
 	case rule.ActionConvert:
-		err = doConvert(fi, r.Action, dest)
+		err = doConvert(fi, action, dest)
 	case rule.ActionResize:
-		err = doResize(fi, r.Action, dest)
+		err = doResize(fi, action, dest)
 	case rule.ActionWatermark:
-		err = doWatermark(fi, r.Action, dest)
+		err = doWatermark(fi, action, dest)
 	case rule.ActionOCR:
-		dest, err = doOCR(fi, r.Action, dest)
+		dest, err = doOCR(fi, action, dest)
 		rec.Dest = dest
 	case rule.ActionEncrypt:
-		err = doEncrypt(fi, r.Action, dest)
+		err = doEncrypt(fi, action, dest)
 	case rule.ActionDecrypt:
-		err = doDecrypt(fi, r.Action, dest)
+		err = doDecrypt(fi, action, dest)
 	case rule.ActionUpload:
-		err = doUpload(fi, r.Action)
-		rec.Dest = r.Action.Remote
+		err = doUpload(fi, action)
+		rec.Dest = action.Remote
 	case rule.ActionTag:
-		err = doTag(fi, r.Action)
+		err = doTag(fi, action)
+		rec.Dest = ""
+	case rule.ActionOpen:
+		err = doOpen(fi, action)
+		rec.Dest = ""
+	case rule.ActionDeduplicate:
+		var dedupDest string
+		dedupDest, err = rule.ExpandString(action.Dest, fi)
+		if err == nil {
+			var outcome string
+			outcome, err = doDeduplicate(fi.Path, dedupDest, action.OnDuplicate)
+			rec.Dest = outcome + ":" + dedupDest
+		}
+	case rule.ActionUnquarantine:
+		err = doUnquarantine(fi.Path)
 		rec.Dest = ""
 	default:
-		err = fmt.Errorf("unknown action %q", r.Action.Type)
+		err = fmt.Errorf("unknown action %q", action.Type)
 	}
 
 	if err != nil {
 		rec.Error = err.Error()
 		_ = d.History.Append(rec)
-		return nil, fmt.Errorf("%s %s -> %s: %w", r.Action.Type, fi.Path, dest, err)
+		return nil, fmt.Errorf("%s %s -> %s: %w", action.Type, fi.Path, dest, err)
 	}
 
 	_ = d.History.Append(rec)
 	return &Result{Record: rec}, nil
+}
+
+func newChainID() string {
+	b := make([]byte, 4)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("c%d", time.Now().UnixNano())
+	}
+	return "c" + hex.EncodeToString(b)
 }
 
 func doMove(src, dest string) error {
@@ -172,6 +235,20 @@ func (d *Dispatcher) Undo(rec history.Record) error {
 		return err
 	case "checksum", "convert", "resize", "watermark", "ocr", "encrypt", "decrypt":
 		return os.Remove(rec.Dest)
+	case "deduplicate":
+		// rec.Dest is "outcome:path"
+		parts := strings.SplitN(rec.Dest, ":", 2)
+		outcome, dest := parts[0], parts[1]
+		switch outcome {
+		case "moved":
+			return doMove(dest, rec.Src)
+		case "skip":
+			return nil
+		case "delete":
+			return fmt.Errorf("cannot undo deduplicate: source was deleted as duplicate")
+		default:
+			return fmt.Errorf("cannot undo deduplicate: unknown outcome %q", outcome)
+		}
 	default:
 		return fmt.Errorf("cannot undo action %q", rec.Action)
 	}

@@ -37,8 +37,11 @@ Show recent dispatch actions. Use \fB\-n\fR or \fB\-\-limit\fR to control output
 Reverse the most recent action, or a specific action by ID. Use \fB\-\-last N\fR
 to undo the last N actions.
 .TP
-.B rules
-List all configured rules (global and per\-directory).
+.B rules \fR[\fIdirectory...\fR] [\fB\-\-global\fR]
+List configured rules. With no arguments, shows all global and per\-directory
+rules. With directory arguments, shows only the per\-directory rules from
+\fI.sortie.yaml\fR for those directories. Use \fB\-\-global\fR to also include
+global rules.
 .TP
 .B rules test \fR\fIfile\fR
 Show which rule would match a given file.
@@ -60,6 +63,28 @@ List files in the trash directory.
 .TP
 .B trash purge
 Permanently delete all files in trash.
+.TP
+.B validate \fR[\fIdirectory...\fR] [\fB\-\-global\fR]
+Check rules for configuration errors, missing required fields, incompatible
+action chains, and potential infinite loop risks. With no arguments, validates
+all rules. With directory arguments, validates only the per\-directory rules
+from \fI.sortie.yaml\fR. Use \fB\-\-global\fR to also include global rules.
+Exits with code 0 if no errors (warnings may still be present), or 1 if
+errors exist.
+.PP
+Checks performed:
+.RS 4
+.IP \(bu 2
+Missing required fields (dest, mode, command, tool, overlay, recipient, etc.)
+.IP \(bu 2
+Invalid field values (bad octal mode, unknown algorithm, unknown on_duplicate)
+.IP \(bu 2
+Unknown action types
+.IP \(bu 2
+Incompatible chain combinations (delete/compress/deduplicate not last, consecutive moves, async open before other actions)
+.IP \(bu 2
+Infinite loop risk when a destination falls inside a watched directory
+.RE
 .TP
 .B man
 Display this manual page.
@@ -113,6 +138,27 @@ rules:
       type: move
       dest: ~/Pictures/Sorted/{{.Year}}/{{.Month}}
 .fi
+.SS "Action Chaining"
+Rules can specify multiple actions using \fBactions:\fR (plural) instead of
+\fBaction:\fR (singular). Actions execute in order. If a move or rename changes
+the file's location, subsequent actions operate on the file at its new path.
+.PP
+.nf
+rules:
+  \- name: sort\-and\-notify
+    match:
+      extensions: [.pdf]
+    actions:
+      \- type: notify
+        title: "New PDF"
+        message: "{{.Name}}{{.Ext}} arrived"
+      \- type: move
+        dest: ~/Documents/PDFs/{{.Name}}{{.Ext}}
+.fi
+.PP
+If any action fails, the chain stops. Each action is recorded separately in
+history with a shared chain ID. Undo reverses all actions in a chain together.
+The singular \fBaction:\fR form continues to work.
 .SS "Per\-Directory Config"
 Place a \fI.sortie.yaml\fR file in any watched directory. These rules are
 evaluated before global rules for that directory.
@@ -224,6 +270,21 @@ Not undoable.
 .B tag
 Apply macOS Finder tags to a file via \fBxattr\fR. Requires \fBtags\fR list.
 Not undoable.
+.TP
+.B open
+Open a file with the default application, or a specific app if \fBapp\fR is set
+(e.g., "VLC", "Preview"). Uses macOS \fBopen\fR(1). Not undoable.
+.TP
+.B deduplicate
+Check if an identical file (by SHA\-256 hash) already exists at \fBdest\fR. If no
+duplicate, the file is moved to dest. If a duplicate is found, behavior depends
+on \fBon_duplicate\fR: "skip" (default) leaves the source in place, "delete"
+removes the source. Undoable when the file was moved; not undoable when deleted.
+.TP
+.B unquarantine
+Remove the macOS \fBcom.apple.quarantine\fR extended attribute from a file.
+Useful for files from trusted sources. No\-op if the attribute is not present.
+Not undoable.
 .SS "Template Variables"
 Destination paths and action fields support Go template syntax:
 .TP
@@ -297,6 +358,14 @@ List of macOS Finder tag names (e.g., [Red, Finance]). Used by tag.
 .B remote
 Upload destination URI (template\-expanded). Used by upload. Supported schemes:
 s3:// (uses \fBaws\fR), gs:// (uses \fBgsutil\fR).
+.TP
+.B app
+Application name for the open action (e.g., "VLC", "Preview"). If omitted,
+the system default application is used.
+.TP
+.B on_duplicate
+Behavior when deduplicate finds a duplicate: "skip" (default) leaves the source
+in place, "delete" removes the source file.
 .SS "External Tool Requirements"
 Some actions require external tools to be installed:
 .TP
@@ -619,6 +688,54 @@ rules:
       min_age: 30d
     action:
       type: delete
+.fi
+.PP
+Auto\-mount disk images:
+.PP
+.nf
+rules:
+  \- name: open\-dmg
+    match:
+      extensions: [.dmg]
+    action:
+      type: open
+.fi
+.PP
+Open videos with VLC:
+.PP
+.nf
+rules:
+  \- name: open\-videos\-vlc
+    match:
+      extensions: [.mkv, .avi]
+    action:
+      type: open
+      app: VLC
+.fi
+.PP
+Deduplicate downloads:
+.PP
+.nf
+rules:
+  \- name: dedup\-downloads
+    match:
+      extensions: [.pdf, .zip]
+    action:
+      type: deduplicate
+      dest: ~/Documents/{{.Name}}{{.Ext}}
+      on_duplicate: skip
+.fi
+.PP
+Remove quarantine from trusted sources:
+.PP
+.nf
+rules:
+  \- name: unquarantine\-trusted
+    match:
+      extensions: [.dmg, .pkg]
+      glob: "trusted\-*"
+    action:
+      type: unquarantine
 .fi
 .SH RUNNING AS A SERVICE
 On macOS, sortie can run as a launchd user agent to watch directories

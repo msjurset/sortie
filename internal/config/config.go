@@ -65,7 +65,7 @@ func Load(path string) (*Config, error) {
 		cfg.Directories[i].Path = expandHome(cfg.Directories[i].Path)
 	}
 	for i := range cfg.Rules {
-		cfg.Rules[i].Action.Dest = expandHome(cfg.Rules[i].Action.Dest)
+		expandRuleHomes(&cfg.Rules[i])
 	}
 
 	return cfg, nil
@@ -89,7 +89,7 @@ func LoadDirConfig(dir string) (*DirConfig, error) {
 	}
 
 	for i := range dc.Rules {
-		dc.Rules[i].Action.Dest = expandHome(dc.Rules[i].Action.Dest)
+		expandRuleHomes(&dc.Rules[i])
 	}
 
 	return &dc, nil
@@ -133,6 +133,13 @@ func defaults() *Config {
 		LogDir:      filepath.Join(base, "logs"),
 		HistoryFile: filepath.Join(base, "history.json"),
 		TrashDir:    filepath.Join(base, "trash"),
+	}
+}
+
+func expandRuleHomes(r *rule.Rule) {
+	r.Action.Dest = expandHome(r.Action.Dest)
+	for i := range r.Actions {
+		r.Actions[i].Dest = expandHome(r.Actions[i].Dest)
 	}
 }
 
