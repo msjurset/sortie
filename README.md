@@ -409,9 +409,20 @@ Some action types shell out to external tools. Install only the tools you need:
 | `upload` | auto-detect from URI | `brew install awscli` | `gsutil` |
 | `tag` | `xattr` | Built-in (macOS) | — |
 | `notify` | `osascript` | Built-in (macOS) | HTTP webhook |
-| `extract` (.tar.xz) | `tar` | Built-in | — |
+| `extract` | Go stdlib | Built-in | `tar` for .tar.xz only |
 | `open` | `open` | Built-in (macOS) | — |
 | `unquarantine` | `xattr` | Built-in (macOS) | — |
+
+The `extract` action handles `.zip`, `.tar`, `.tar.gz`/`.tgz`, and `.tar.bz2` natively (Go stdlib). Only `.tar.xz` requires the external `tar` command. For other archive formats (`.rar`, `.7z`, etc.), use `exec`:
+
+```yaml
+  - name: extract-rar
+    match:
+      extensions: [.rar]
+    action:
+      type: exec
+      command: "unrar x '{{.Path}}' ~/Downloads/Extracted/"
+```
 
 Actions that require a missing tool will fail with a clear error message indicating which tool to install. Use the `tool` field in your rule to override the default:
 
