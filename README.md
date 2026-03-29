@@ -413,7 +413,27 @@ Some action types shell out to external tools. Install only the tools you need:
 | `open` | `open` | Built-in (macOS) | — |
 | `unquarantine` | `xattr` | Built-in (macOS) | — |
 
-Actions that require a missing tool will fail with a clear error message indicating which tool to install. The `tool` field can override the default for any action (e.g., `tool: gpg` instead of `age`).
+Actions that require a missing tool will fail with a clear error message indicating which tool to install. Use the `tool` field in your rule to override the default:
+
+```yaml
+  - name: encrypt-with-gpg
+    match:
+      glob: "confidential-*"
+    action:
+      type: encrypt
+      tool: gpg                    # use gpg instead of the default (age)
+      recipient: user@example.com
+      dest: ~/Encrypted/{{.Name}}{{.Ext}}.gpg
+
+  - name: resize-with-imagemagick
+    match:
+      extensions: [.jpg, .png]
+    action:
+      type: resize
+      tool: convert                # use ImageMagick instead of the default (sips)
+      width: 1920
+      dest: ~/Pictures/Resized/{{.Name}}{{.Ext}}
+```
 
 ## Running as a Service (macOS)
 
