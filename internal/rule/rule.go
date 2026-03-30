@@ -2,14 +2,17 @@ package rule
 
 import (
 	"fmt"
+	"log"
 	"mime"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -106,6 +109,12 @@ type Action struct {
 	OnDuplicate string   `yaml:"on_duplicate,omitempty"` // deduplicate: "skip" (default) or "delete"
 }
 
+// MatchResult pairs a matched rule with any named captures from content_regex.
+type MatchResult struct {
+	Rule     *Rule
+	Captures map[string]string
+}
+
 // FileInfo wraps os.FileInfo with the full file path.
 type FileInfo struct {
 	Path string
@@ -123,6 +132,14 @@ func NewFileInfo(path string) (FileInfo, error) {
 
 // Matches returns true if the file satisfies all conditions in the rule.
 func (r *Rule) Matches(fi FileInfo) bool {
+	ok, _ := r.MatchWithCaptures(fi)
+	return ok
+}
+
+// MatchWithCaptures returns whether the file matches and any named capture
+// groups extracted from content_regex. Use named groups like
+// (?P<company>...) in content_regex to populate the captures map.
+func (r *Rule) MatchWithCaptures(fi FileInfo) (bool, map[string]string) {
 	if len(r.Match.Extensions) > 0 {
 		ext := strings.ToLower(filepath.Ext(fi.Info.Name()))
 		found := false
@@ -133,35 +150,35 @@ func (r *Rule) Matches(fi FileInfo) bool {
 			}
 		}
 		if !found {
-			return false
+			return false, nil
 		}
 	}
 
 	if r.Match.Glob != "" {
 		matched, err := filepath.Match(r.Match.Glob, fi.Info.Name())
 		if err != nil || !matched {
-			return false
+			return false, nil
 		}
 	}
 
 	if r.Match.Regex != "" {
 		re, err := regexp.Compile(r.Match.Regex)
 		if err != nil || !re.MatchString(fi.Info.Name()) {
-			return false
+			return false, nil
 		}
 	}
 
 	if r.Match.MinSize != "" {
 		sz, err := ParseSize(r.Match.MinSize)
 		if err != nil || fi.Info.Size() < sz {
-			return false
+			return false, nil
 		}
 	}
 
 	if r.Match.MaxSize != "" {
 		sz, err := ParseSize(r.Match.MaxSize)
 		if err != nil || fi.Info.Size() > sz {
-			return false
+			return false, nil
 		}
 	}
 
@@ -170,70 +187,241 @@ func (r *Rule) Matches(fi FileInfo) bool {
 	if r.Match.MinAge != "" {
 		d, err := ParseAge(r.Match.MinAge)
 		if err != nil || now.Sub(fi.Info.ModTime()) < d {
-			return false
+			return false, nil
 		}
 	}
 
 	if r.Match.MaxAge != "" {
 		d, err := ParseAge(r.Match.MaxAge)
 		if err != nil || now.Sub(fi.Info.ModTime()) > d {
-			return false
+			return false, nil
 		}
 	}
 
 	if r.Match.MimeType != "" {
 		detected := detectMIME(fi.Path)
 		if !strings.HasPrefix(detected, r.Match.MimeType) {
-			return false
+			return false, nil
 		}
 	}
 
 	// Content matching — most expensive, runs last after all cheap checks pass
 	if r.Match.Content != "" || r.Match.ContentRegex != "" {
-		if !matchContent(fi.Path, r.Match) {
-			return false
+		ok, captures := matchContent(fi.Path, r.Match)
+		if !ok {
+			return false, nil
+		}
+		return true, captures
+	}
+
+	return true, nil
+}
+
+func matchContent(path string, m Match) (bool, map[string]string) {
+	content, ok := readContent(path, m.ContentBytes)
+	if !ok {
+		return false, nil
+	}
+
+	if m.Content != "" {
+		if !strings.Contains(strings.ToLower(content), strings.ToLower(m.Content)) {
+			return false, nil
 		}
 	}
 
-	return true
+	var captures map[string]string
+	if m.ContentRegex != "" {
+		re, err := regexp.Compile(m.ContentRegex)
+		if err != nil {
+			return false, nil
+		}
+		match := re.FindStringSubmatch(content)
+		if match == nil {
+			return false, nil
+		}
+		// Extract named capture groups. For any that are empty, retry
+		// with an isolated search so optional groups at varying positions
+		// are found (RE2's leftmost-match can miss optional groups).
+		names := re.SubexpNames()
+		for i, name := range names {
+			if i == 0 || name == "" {
+				continue
+			}
+			if captures == nil {
+				captures = make(map[string]string)
+			}
+			if match[i] != "" {
+				captures[name] = match[i]
+			} else {
+				sub := re.SubexpIndex(name)
+				if sub < 0 {
+					continue
+				}
+				// Extract the sub-pattern for this named group and
+				// search independently for it in the content.
+				groupRe := extractNamedGroup(m.ContentRegex, name)
+				if groupRe != nil {
+					if gm := groupRe.FindStringSubmatch(content); gm != nil {
+						idx := groupRe.SubexpIndex(name)
+						if idx > 0 && idx < len(gm) && gm[idx] != "" {
+							captures[name] = gm[idx]
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Normalize date captures to YYYY-MM-DD
+	if captures != nil {
+		for k, v := range captures {
+			if strings.EqualFold(k, "date") && v != "" {
+				if norm := normalizeDate(v); norm != "" {
+					captures[k] = norm
+				}
+			}
+		}
+	}
+
+	return true, captures
 }
 
-func matchContent(path string, m Match) bool {
-	maxBytes := m.ContentBytes
+// normalizeDate attempts to parse common date formats and return YYYY-MM-DD.
+// Supported formats: YYYY-MM-DD, DD-Mon-YYYY (28-FEB-2026),
+// Month D, YYYY (March 6, 2026), MM/DD/YYYY, YYYY/MM/DD.
+func normalizeDate(s string) string {
+	s = strings.TrimSpace(s)
+	formats := []string{
+		"2006-01-02",          // YYYY-MM-DD
+		"02-Jan-2006",         // DD-Mon-YYYY
+		"January 2, 2006",     // Month D, YYYY
+		"January 02, 2006",    // Month DD, YYYY
+		"Jan 2, 2006",         // Mon D, YYYY
+		"Jan 02, 2006",        // Mon DD, YYYY
+		"01/02/2006",          // MM/DD/YYYY
+		"1/2/2006",            // M/D/YYYY
+		"2006/01/02",          // YYYY/MM/DD
+	}
+	for _, f := range formats {
+		if t, err := time.Parse(f, s); err == nil {
+			return t.Format("2006-01-02")
+		}
+	}
+	return ""
+}
+
+// readContent returns the text content of a file for matching. For PDF files,
+// it shells out to pdftotext to extract readable text. For all other files,
+// it reads raw bytes up to maxBytes.
+func readContent(path string, maxBytes int) (string, bool) {
 	if maxBytes <= 0 {
 		maxBytes = 65536 // 64KB default
 	}
 
+	if isPDF(path) {
+		text, err := extractPDFText(path)
+		if err != nil {
+			warnPDFToText(err)
+			return "", false
+		}
+		if text == "" {
+			return "", false
+		}
+		if len(text) > maxBytes {
+			text = text[:maxBytes]
+		}
+		return text, true
+	}
+
 	f, err := os.Open(path)
 	if err != nil {
-		return false
+		return "", false
 	}
 	defer f.Close()
 
 	buf := make([]byte, maxBytes)
 	n, _ := f.Read(buf)
 	if n == 0 {
+		return "", false
+	}
+	return string(buf[:n]), true
+}
+
+// isPDF checks if a file is a PDF by magic bytes. The extension is used as a
+// hint — if the file has a .pdf extension, the magic bytes are verified to
+// confirm it's a real PDF (not a plain text file with a .pdf name).
+func isPDF(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
 		return false
 	}
-	content := string(buf[:n])
+	defer f.Close()
+	var magic [5]byte
+	n, _ := f.Read(magic[:])
+	return n >= 5 && string(magic[:5]) == "%PDF-"
+}
 
-	if m.Content != "" {
-		if !strings.Contains(strings.ToLower(content), strings.ToLower(m.Content)) {
-			return false
+// extractPDFText uses pdftotext to extract text from a PDF file.
+// Only the first 10 pages are extracted to bound memory usage.
+func extractPDFText(path string) (string, error) {
+	bin, err := exec.LookPath("pdftotext")
+	if err != nil {
+		return "", fmt.Errorf("pdftotext not found (brew install poppler): %w", err)
+	}
+	out, err := exec.Command(bin, "-layout", "-l", "10", path, "-").CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("pdftotext: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	return string(out), nil
+}
+
+var pdfWarnOnce sync.Once
+
+// warnPDFToText logs a warning once when PDF text extraction fails.
+func warnPDFToText(err error) {
+	pdfWarnOnce.Do(func() {
+		log.Printf("warning: PDF content matching unavailable: %v", err)
+	})
+}
+
+// extractNamedGroup compiles a regex containing only the named group with the
+// given name from a larger regex pattern. It isolates (?P<name>...) so it can
+// be searched independently in content, working around RE2's leftmost-match
+// behavior with optional groups.
+func extractNamedGroup(pattern, name string) *regexp.Regexp {
+	prefix := "(?P<" + name + ">"
+	start := strings.Index(pattern, prefix)
+	if start < 0 {
+		return nil
+	}
+	depth := 0
+	inCharClass := false
+	for i := start; i < len(pattern); i++ {
+		ch := pattern[i]
+		switch {
+		case ch == '\\' && i+1 < len(pattern):
+			i++ // skip escaped char
+		case ch == '[' && !inCharClass:
+			inCharClass = true
+		case ch == ']' && inCharClass:
+			inCharClass = false
+		case inCharClass:
+			// ignore parens inside character classes
+		case ch == '(':
+			depth++
+		case ch == ')':
+			depth--
+			if depth == 0 {
+				sub := pattern[start : i+1]
+				re, err := regexp.Compile(sub)
+				if err != nil {
+					return nil
+				}
+				return re
+			}
 		}
 	}
-
-	if m.ContentRegex != "" {
-		re, err := regexp.Compile(m.ContentRegex)
-		if err != nil {
-			return false
-		}
-		if !re.MatchString(content) {
-			return false
-		}
-	}
-
-	return true
+	return nil
 }
 
 // detectMIME returns the MIME type of a file using extension-based lookup
@@ -263,15 +451,11 @@ func detectMIME(path string) string {
 }
 
 // FirstMatch returns the highest-priority rule that matches the given file.
-// Rules are stable-sorted by priority (descending) so that declaration order
-// is preserved as a tiebreaker. Per-directory rules should precede global
-// rules in the input slice to win at equal priority.
-// FirstMatch returns the highest-priority rule that matches the given file.
-// Deprecated: use FindMatches for continue support.
-func FirstMatch(rules []Rule, fi FileInfo) *Rule {
+// Deprecated: use FindMatches for continue and capture support.
+func FirstMatch(rules []Rule, fi FileInfo) *MatchResult {
 	matches := FindMatches(rules, fi)
 	if len(matches) > 0 {
-		return matches[0]
+		return &matches[0]
 	}
 	return nil
 }
@@ -280,18 +464,20 @@ func FirstMatch(rules []Rule, fi FileInfo) *Rule {
 // ordering and the continue flag. Rules are stable-sorted by priority
 // (descending). Matching stops at the first rule that does NOT have
 // continue: true. This preserves first-match-wins as the default while
-// allowing explicit fall-through.
-func FindMatches(rules []Rule, fi FileInfo) []*Rule {
+// allowing explicit fall-through. Each result includes any named captures
+// from content_regex.
+func FindMatches(rules []Rule, fi FileInfo) []MatchResult {
 	sorted := make([]Rule, len(rules))
 	copy(sorted, rules)
 	slices.SortStableFunc(sorted, func(a, b Rule) int {
 		return b.Priority - a.Priority // descending
 	})
 
-	var matched []*Rule
+	var matched []MatchResult
 	for i := range sorted {
-		if sorted[i].Matches(fi) {
-			matched = append(matched, &sorted[i])
+		ok, captures := sorted[i].MatchWithCaptures(fi)
+		if ok {
+			matched = append(matched, MatchResult{Rule: &sorted[i], Captures: captures})
 			if !sorted[i].Continue {
 				break
 			}

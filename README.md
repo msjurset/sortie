@@ -40,7 +40,7 @@ sortie [command] [flags]
 
 | Command | Description |
 |---------|-------------|
-| `scan [directory...]` | Scan directories and apply rules |
+| `scan [path...]` | Scan directories or individual files and apply rules |
 | `watch` | Watch directories and dispatch files in real time |
 | `history` | Show action history |
 | `undo [id]` | Reverse recent dispatch actions |
@@ -324,6 +324,22 @@ rules:
       glob: "trusted-*"
     action:
       type: unquarantine
+
+  # Use named capture groups in content_regex to extract values from file
+  # content and reference them in templates as {{.Match.name}}.
+  # PDF text is extracted via pdftotext automatically.
+  # Capture groups named "date" are normalized to YYYY-MM-DD.
+  - name: sort-invoices
+    match:
+      extensions: [.pdf]
+      content: invoice
+      content_regex: '(?P<company>Oracle|Squarespace)?.*?(?P<date>\d{4}-\d{2}-\d{2}|\d{1,2}-[A-Za-z]{3}-\d{4}|[A-Z][a-z]+ \d{1,2}, \d{4})'
+    actions:
+      - type: notify
+        title: "Invoice received"
+        message: '{{or .Match.company "Vendor"}} - {{or .Match.date "undated"}}'
+      - type: move
+        dest: '~/Documents/Invoices/invoice-{{or .Match.company "Vendor"}}-{{or .Match.date "undated"}}{{.Ext}}'
 ```
 
 ### Per-Directory Config (`~/Downloads/.sortie.yaml`)
@@ -425,8 +441,8 @@ A leading `!` negates a pattern (re-includes a previously ignored file). A leadi
 | `min_size` / `max_size` | Size threshold | `500MB`, `1GB` |
 | `min_age` / `max_age` | Age threshold | `30d`, `2h` |
 | `mime_type` | MIME type prefix | `image/`, `application/pdf` |
-| `content` | Substring in file content | `TODO` |
-| `content_regex` | Regex against file content | `(?i)confidential` |
+| `content` | Substring in file content (PDF text extracted via `pdftotext`) | `TODO` |
+| `content_regex` | Regex against file content; named groups become template vars; `date` groups auto-normalize to YYYY-MM-DD | `(?P<company>\w+).*(?P<date>\d{4}-\d{2}-\d{2})` |
 | `content_bytes` | Hex byte signature (magic bytes) | `25504446` (PDF) |
 
 ### Action Types
@@ -468,6 +484,7 @@ A leading `!` negates a pattern (re-includes a previously ignored file). A leadi
 | `{{.Day}}` | 2-digit day | `18` |
 | `{{.Date}}` | YYYY-MM-DD | `2026-03-18` |
 | `{{.Time}}` | HH-MM-SS | `14-30-00` |
+| `{{.Match.name}}` | Named capture from `content_regex` | `{{.Match.company}}` |
 
 ### External Tool Requirements
 
@@ -486,6 +503,7 @@ Some action types shell out to external tools. Install only the tools you need:
 | `notify` | `osascript` | Built-in (macOS) | HTTP webhook |
 | `extract` | Go stdlib | Built-in | `tar` for .tar.xz only |
 | `open` | `open` | Built-in (macOS) | — |
+| `content`/`content_regex` (PDF) | `pdftotext` | `brew install poppler` | — |
 | `unquarantine` | `xattr` | Built-in (macOS) | — |
 
 The `extract` action handles `.zip`, `.tar`, `.tar.gz`/`.tgz`, and `.tar.bz2` natively (Go stdlib). Only `.tar.xz` requires the external `tar` command. macOS metadata (`__MACOSX`, `._*` resource forks, `.DS_Store`) is automatically stripped during extraction. For other archive formats (`.rar`, `.7z`, etc.), use `exec`:

@@ -48,7 +48,9 @@ type Result struct {
 // actions (action chaining), each action is executed in order and linked by
 // a shared ChainID in the history. If any action fails, the chain stops.
 // In dry-run mode, no changes are made but the planned actions are returned.
-func (d *Dispatcher) Dispatch(fi rule.FileInfo, r rule.Rule, dryRun bool) (*Result, error) {
+// The captures map holds named groups from content_regex matching, available
+// in templates as {{.Match.name}}.
+func (d *Dispatcher) Dispatch(fi rule.FileInfo, r rule.Rule, captures map[string]string, dryRun bool) (*Result, error) {
 	actions := r.ResolvedActions()
 	if len(actions) == 0 {
 		return nil, fmt.Errorf("rule %q has no actions", r.Name)
@@ -56,14 +58,14 @@ func (d *Dispatcher) Dispatch(fi rule.FileInfo, r rule.Rule, dryRun bool) (*Resu
 
 	// Single action — no chain overhead
 	if len(actions) == 1 {
-		return d.dispatchAction(fi, r.Name, actions[0], "", dryRun)
+		return d.dispatchAction(fi, r.Name, actions[0], "", captures, dryRun)
 	}
 
 	// Multiple actions — generate a shared chain ID
 	chainID := newChainID()
 	var lastResult *Result
 	for _, action := range actions {
-		result, err := d.dispatchAction(fi, r.Name, action, chainID, dryRun)
+		result, err := d.dispatchAction(fi, r.Name, action, chainID, captures, dryRun)
 		if err != nil {
 			return nil, err
 		}
@@ -85,8 +87,8 @@ func (d *Dispatcher) Dispatch(fi rule.FileInfo, r rule.Rule, dryRun bool) (*Resu
 }
 
 // dispatchAction executes a single action against a file.
-func (d *Dispatcher) dispatchAction(fi rule.FileInfo, ruleName string, action rule.Action, chainID string, dryRun bool) (*Result, error) {
-	dest, err := rule.ExpandTemplate(action.Dest, fi)
+func (d *Dispatcher) dispatchAction(fi rule.FileInfo, ruleName string, action rule.Action, chainID string, captures map[string]string, dryRun bool) (*Result, error) {
+	dest, err := rule.ExpandTemplate(action.Dest, fi, captures)
 	if err != nil {
 		return nil, fmt.Errorf("expanding template: %w", err)
 	}
@@ -118,7 +120,7 @@ func (d *Dispatcher) dispatchAction(fi rule.FileInfo, ruleName string, action ru
 		rec.Dest = dest
 	case rule.ActionExtract:
 		var extractDest string
-		extractDest, err = rule.ExpandString(action.Dest, fi)
+		extractDest, err = rule.ExpandString(action.Dest, fi, captures)
 		if err == nil {
 			err = doExtract(fi.Path, extractDest)
 			rec.Dest = extractDest
@@ -133,11 +135,11 @@ func (d *Dispatcher) dispatchAction(fi rule.FileInfo, ruleName string, action ru
 		dest, err = doChecksum(fi.Path, dest, action.Algorithm)
 		rec.Dest = dest
 	case rule.ActionExec:
-		err = doExec(fi, action)
+		err = doExec(fi, action, captures)
 	case rule.ActionNotify:
-		err = doNotify(fi, action)
+		err = doNotify(fi, action, captures)
 	case rule.ActionConvert:
-		err = doConvert(fi, action, dest)
+		err = doConvert(fi, action, dest, captures)
 	case rule.ActionResize:
 		err = doResize(fi, action, dest)
 	case rule.ActionWatermark:
@@ -150,7 +152,7 @@ func (d *Dispatcher) dispatchAction(fi rule.FileInfo, ruleName string, action ru
 	case rule.ActionDecrypt:
 		err = doDecrypt(fi, action, dest)
 	case rule.ActionUpload:
-		err = doUpload(fi, action)
+		err = doUpload(fi, action, captures)
 		rec.Dest = action.Remote
 	case rule.ActionTag:
 		err = doTag(fi, action)
@@ -160,7 +162,7 @@ func (d *Dispatcher) dispatchAction(fi rule.FileInfo, ruleName string, action ru
 		rec.Dest = ""
 	case rule.ActionDeduplicate:
 		var dedupDest string
-		dedupDest, err = rule.ExpandString(action.Dest, fi)
+		dedupDest, err = rule.ExpandString(action.Dest, fi, captures)
 		if err == nil {
 			var outcome string
 			outcome, err = doDeduplicate(fi.Path, dedupDest, action.OnDuplicate)

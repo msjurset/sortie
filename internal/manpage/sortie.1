@@ -20,9 +20,10 @@ files add or override rules for specific directories. Per\-directory rules
 take precedence over global rules (first\-match\-wins evaluation).
 .SH COMMANDS
 .TP
-.B scan \fR[\fIdirectory...\fR]
-Scan one or more directories (or all configured directories) and apply matching
-rules. Use \fB\-\-dry\-run\fR to preview without executing.
+.B scan \fR[\fIpath...\fR]
+Scan directories, individual files, or shell globs (e.g., ~/Downloads/*.pdf)
+and apply matching rules. With no arguments, scans all configured directories.
+Use \fB\-\-dry\-run\fR to preview without executing.
 .TP
 .B watch
 Watch all configured directories for new files in real time. Runs as a
@@ -244,10 +245,16 @@ File age thresholds (e.g., "30d", "2h").
 MIME type prefix match (e.g., "image/", "application/pdf").
 .TP
 .B content
-Substring match against the file's text content.
+Substring match against the file's text content. For PDF files, text is
+extracted using \fBpdftotext\fR(1) (from poppler) if available; otherwise
+raw bytes are searched.
 .TP
 .B content_regex
-Regular expression matched against the file's text content.
+Regular expression matched against the file's text content (with PDF extraction
+as above). Named capture groups (e.g., \fB(?P<company>...)\fR) are extracted
+and available in templates as \fB{{.Match.company}}\fR. Capture groups named
+\fBdate\fR are automatically normalized to YYYY\-MM\-DD from common formats
+(DD\-MON\-YYYY, Month D YYYY, MM/DD/YYYY, etc.).
 .TP
 .B content_bytes
 Hex\-encoded byte sequence matched against the file's raw bytes. Useful for
@@ -367,6 +374,10 @@ YYYY\-MM\-DD format.
 .TP
 .B {{.Time}}
 HH\-MM\-SS format.
+.TP
+.B {{.Match.\fIname\fB}}
+Named capture group from \fBcontent_regex\fR. For example, if the regex contains
+\fB(?P<company>...)\fR, use \fB{{.Match.company}}\fR in templates.
 .SS "Action Configuration Fields"
 The following fields are available in the \fBaction:\fR block depending on
 the action type:
@@ -835,6 +846,23 @@ rules:
       glob: "trusted\-*"
     action:
       type: unquarantine
+.fi
+.PP
+Sort invoices using content capture groups:
+.PP
+.nf
+rules:
+  \- name: sort\-invoices
+    match:
+      extensions: [.pdf]
+      content: invoice
+      content_regex: "(?P<company>[A\-Za\-z]+).*(?P<date>\\d{4}\-\\d{2}\-\\d{2})"
+    actions:
+      \- type: notify
+        title: "Invoice received"
+        message: "{{.Match.company}} \- {{.Match.date}}"
+      \- type: move
+        dest: ~/Documents/Invoices/invoice\-{{.Match.company}}\-{{.Match.date}}{{.Ext}}
 .fi
 .SH RUNNING AS A SERVICE
 On macOS, sortie can run as a launchd user agent to watch directories

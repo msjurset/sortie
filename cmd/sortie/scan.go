@@ -19,9 +19,9 @@ var scanFlags struct {
 }
 
 var scanCmd = &cobra.Command{
-	Use:   "scan [directory...]",
-	Short: "Scan directories and apply rules",
-	Long:  "Scan one or more directories (or all configured directories) and dispatch files according to rules.",
+	Use:   "scan [path...]",
+	Short: "Scan directories or files and apply rules",
+	Long:  "Scan one or more directories or files (or all configured directories) and dispatch files according to rules. Accepts individual file paths, glob patterns (expanded by the shell), or directories.",
 	RunE:  runScan,
 }
 
@@ -32,25 +32,51 @@ func init() {
 }
 
 func runScan(cmd *cobra.Command, args []string) error {
-	dirs := args
-	if len(dirs) == 0 {
+	store := history.NewStore(cfg.HistoryFile)
+	disp := dispatcher.New(store, dispatcher.WithTrashDir(cfg.TrashDir))
+	rl := dispatcher.NewRateLimiter(scanFlags.rateLimit)
+
+	var dirs []string
+	var files []string
+
+	for _, arg := range args {
+		arg = expandHome(arg)
+		info, err := os.Stat(arg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			continue
+		}
+		if info.IsDir() {
+			dirs = append(dirs, arg)
+		} else {
+			files = append(files, arg)
+		}
+	}
+
+	// No args — fall back to configured directories
+	if len(args) == 0 {
 		for _, d := range cfg.Directories {
 			dirs = append(dirs, d.Path)
 		}
 	}
 
-	if len(dirs) == 0 {
-		return fmt.Errorf("no directories specified and none configured")
+	if len(dirs) == 0 && len(files) == 0 {
+		return fmt.Errorf("no paths specified and no directories configured")
 	}
-
-	store := history.NewStore(cfg.HistoryFile)
-	disp := dispatcher.New(store, dispatcher.WithTrashDir(cfg.TrashDir))
-	rl := dispatcher.NewRateLimiter(scanFlags.rateLimit)
 
 	var totalActions int
 
+	// Dispatch individual files
+	if len(files) > 0 {
+		n, err := scanFiles(disp, rl, files)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		}
+		totalActions += n
+	}
+
+	// Scan directories
 	for _, dir := range dirs {
-		dir = expandHome(dir)
 		n, err := scanDir(disp, rl, dir)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error scanning %s: %v\n", dir, err)
@@ -68,6 +94,84 @@ func runScan(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func scanFiles(disp *dispatcher.Dispatcher, rl *dispatcher.RateLimiter, files []string) (int, error) {
+	var count int
+	for _, path := range files {
+		dir := filepath.Dir(path)
+		rules, err := cfg.MergedRules(dir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  error loading rules for %s: %v\n", dir, err)
+			continue
+		}
+
+		if len(rules) == 0 {
+			if verbose {
+				fmt.Printf("  %s: no rules configured, skipping\n", path)
+			}
+			continue
+		}
+
+		fi, err := rule.NewFileInfo(path)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  skip %s: %v\n", path, err)
+			continue
+		}
+
+		globalIgnore, localIgnore := cfg.EffectiveIgnore(dir)
+		if rule.ShouldIgnore(globalIgnore, localIgnore, fi) {
+			if verbose {
+				fmt.Printf("  %s: ignored\n", fi.Info.Name())
+			}
+			continue
+		}
+
+		matches := rule.FindMatches(rules, fi)
+		if len(matches) == 0 {
+			if verbose {
+				fmt.Printf("  %s: no match\n", fi.Info.Name())
+			}
+			continue
+		}
+
+		for _, mr := range matches {
+			if mr.Rule.Cooldown != "" {
+				cd, _ := rule.ParseAge(mr.Rule.Cooldown)
+				if !rl.AllowRule(mr.Rule.Name, cd) {
+					if verbose {
+						fmt.Printf("  %s: cooldown (%s)\n", fi.Info.Name(), mr.Rule.Cooldown)
+					}
+					continue
+				}
+			}
+
+			if err := rl.Wait(context.Background()); err != nil {
+				return count, err
+			}
+
+			result, err := disp.Dispatch(fi, *mr.Rule, mr.Captures, scanFlags.dryRun)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  error: %v\n", err)
+				continue
+			}
+
+			prefix := " "
+			if result.DryRun {
+				prefix = "  [dry-run]"
+			}
+			fmt.Printf("%s %s %s -> %s (%s)\n",
+				prefix,
+				result.Record.Action,
+				filepath.Base(result.Record.Src),
+				result.Record.Dest,
+				mr.Rule.Name,
+			)
+			rl.Record(mr.Rule.Name)
+			count++
+		}
+	}
+	return count, nil
 }
 
 func scanDir(disp *dispatcher.Dispatcher, rl *dispatcher.RateLimiter, dir string) (int, error) {
@@ -123,13 +227,13 @@ func scanDir(disp *dispatcher.Dispatcher, rl *dispatcher.RateLimiter, dir string
 			continue
 		}
 
-		for _, matched := range matches {
+		for _, mr := range matches {
 			// Check per-rule cooldown
-			if matched.Cooldown != "" {
-				cd, _ := rule.ParseAge(matched.Cooldown)
-				if !rl.AllowRule(matched.Name, cd) {
+			if mr.Rule.Cooldown != "" {
+				cd, _ := rule.ParseAge(mr.Rule.Cooldown)
+				if !rl.AllowRule(mr.Rule.Name, cd) {
 					if verbose {
-						fmt.Printf("  %s: cooldown (%s)\n", fi.Info.Name(), matched.Cooldown)
+						fmt.Printf("  %s: cooldown (%s)\n", fi.Info.Name(), mr.Rule.Cooldown)
 					}
 					continue
 				}
@@ -140,7 +244,7 @@ func scanDir(disp *dispatcher.Dispatcher, rl *dispatcher.RateLimiter, dir string
 				return count, err
 			}
 
-			result, err := disp.Dispatch(fi, *matched, scanFlags.dryRun)
+			result, err := disp.Dispatch(fi, *mr.Rule, mr.Captures, scanFlags.dryRun)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "  error: %v\n", err)
 				continue
@@ -155,9 +259,9 @@ func scanDir(disp *dispatcher.Dispatcher, rl *dispatcher.RateLimiter, dir string
 				result.Record.Action,
 				filepath.Base(result.Record.Src),
 				result.Record.Dest,
-				matched.Name,
+				mr.Rule.Name,
 			)
-			rl.Record(matched.Name)
+			rl.Record(mr.Rule.Name)
 			count++
 		}
 	}

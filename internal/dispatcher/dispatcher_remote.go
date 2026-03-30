@@ -10,8 +10,8 @@ import (
 
 // doUpload pushes a file to a remote destination. The tool is auto-detected
 // from the URI scheme (s3:// -> aws, gs:// -> gsutil) or can be set explicitly.
-func doUpload(fi rule.FileInfo, action rule.Action) error {
-	remote, err := rule.ExpandString(action.Remote, fi)
+func doUpload(fi rule.FileInfo, action rule.Action, captures map[string]string) error {
+	remote, err := rule.ExpandString(action.Remote, fi, captures)
 	if err != nil {
 		return fmt.Errorf("expanding remote template: %w", err)
 	}

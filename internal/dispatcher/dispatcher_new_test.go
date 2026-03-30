@@ -42,7 +42,7 @@ func TestDispatchExtractZip(t *testing.T) {
 		Action: rule.Action{Type: rule.ActionExtract, Dest: extractDir},
 	}
 
-	result, err := disp.Dispatch(fi, r, false)
+	result, err := disp.Dispatch(fi, r, nil, false)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestDispatchExtractZipSkipsMacOSMetadata(t *testing.T) {
 		Action: rule.Action{Type: rule.ActionExtract, Dest: extractDir},
 	}
 
-	if _, err := disp.Dispatch(fi, r, false); err != nil {
+	if _, err := disp.Dispatch(fi, r, nil, false); err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}
 
@@ -136,7 +136,7 @@ func TestDispatchExtractTarGz(t *testing.T) {
 		Action: rule.Action{Type: rule.ActionExtract, Dest: extractDir},
 	}
 
-	if _, err := disp.Dispatch(fi, r, false); err != nil {
+	if _, err := disp.Dispatch(fi, r, nil, false); err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}
 
@@ -168,7 +168,7 @@ func TestUndoExtract(t *testing.T) {
 		Action: rule.Action{Type: rule.ActionExtract, Dest: extractDir},
 	}
 
-	result, err := disp.Dispatch(fi, r, false)
+	result, err := disp.Dispatch(fi, r, nil, false)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestDispatchSymlink(t *testing.T) {
 		Action: rule.Action{Type: rule.ActionSymlink, Dest: linkPath},
 	}
 
-	result, err := disp.Dispatch(fi, r, false)
+	result, err := disp.Dispatch(fi, r, nil, false)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}
@@ -243,7 +243,7 @@ func TestUndoSymlink(t *testing.T) {
 		Action: rule.Action{Type: rule.ActionSymlink, Dest: linkPath},
 	}
 
-	result, err := disp.Dispatch(fi, r, false)
+	result, err := disp.Dispatch(fi, r, nil, false)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}
@@ -273,7 +273,7 @@ func TestDispatchChmod(t *testing.T) {
 		Action: rule.Action{Type: rule.ActionChmod, Mode: "0755"},
 	}
 
-	result, err := disp.Dispatch(fi, r, false)
+	result, err := disp.Dispatch(fi, r, nil, false)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}
@@ -308,7 +308,7 @@ func TestUndoChmod(t *testing.T) {
 		Action: rule.Action{Type: rule.ActionChmod, Mode: "0755"},
 	}
 
-	result, err := disp.Dispatch(fi, r, false)
+	result, err := disp.Dispatch(fi, r, nil, false)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}
@@ -337,7 +337,7 @@ func TestDispatchChecksum(t *testing.T) {
 		Action: rule.Action{Type: rule.ActionChecksum, Algorithm: "sha256"},
 	}
 
-	result, err := disp.Dispatch(fi, r, false)
+	result, err := disp.Dispatch(fi, r, nil, false)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}
@@ -376,7 +376,7 @@ func TestDispatchChecksumMD5(t *testing.T) {
 		Action: rule.Action{Type: rule.ActionChecksum, Algorithm: "md5"},
 	}
 
-	result, err := disp.Dispatch(fi, r, false)
+	result, err := disp.Dispatch(fi, r, nil, false)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}
@@ -397,7 +397,7 @@ func TestDispatchChecksumDefault(t *testing.T) {
 		Action: rule.Action{Type: rule.ActionChecksum},
 	}
 
-	result, err := disp.Dispatch(fi, r, false)
+	result, err := disp.Dispatch(fi, r, nil, false)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}
@@ -419,7 +419,7 @@ func TestUndoChecksum(t *testing.T) {
 		Action: rule.Action{Type: rule.ActionChecksum, Algorithm: "sha256"},
 	}
 
-	result, err := disp.Dispatch(fi, r, false)
+	result, err := disp.Dispatch(fi, r, nil, false)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}
@@ -448,7 +448,7 @@ func TestDispatchExec(t *testing.T) {
 		Action: rule.Action{Type: rule.ActionExec, Command: "cp '{{.Path}}' '" + outPath + "'"},
 	}
 
-	result, err := disp.Dispatch(fi, r, false)
+	result, err := disp.Dispatch(fi, r, nil, false)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}
@@ -477,7 +477,7 @@ func TestDispatchExecFailure(t *testing.T) {
 		Action: rule.Action{Type: rule.ActionExec, Command: "false"},
 	}
 
-	_, err := disp.Dispatch(fi, r, false)
+	_, err := disp.Dispatch(fi, r, nil, false)
 	if err == nil {
 		t.Fatal("expected error from failing command")
 	}
@@ -561,7 +561,7 @@ func TestDispatchResizeSips(t *testing.T) {
 		},
 	}
 
-	result, err := disp.Dispatch(fi, r, false)
+	result, err := disp.Dispatch(fi, r, nil, false)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}
@@ -614,7 +614,7 @@ func TestDispatchExtractUnsupportedFormat(t *testing.T) {
 		Action: rule.Action{Type: rule.ActionExtract, Dest: destDir},
 	}
 
-	_, err := disp.Dispatch(fi, r, false)
+	_, err := disp.Dispatch(fi, r, nil, false)
 	if err == nil {
 		t.Fatal("expected error for unsupported archive format")
 	}
@@ -666,7 +666,7 @@ func TestDispatchChmodInvalidMode(t *testing.T) {
 		Action: rule.Action{Type: rule.ActionChmod, Mode: "xyz"},
 	}
 
-	_, err := disp.Dispatch(fi, r, false)
+	_, err := disp.Dispatch(fi, r, nil, false)
 	if err == nil {
 		t.Fatal("expected error for invalid mode")
 	}
@@ -688,7 +688,7 @@ func TestDispatchChecksumBadAlgorithm(t *testing.T) {
 		Action: rule.Action{Type: rule.ActionChecksum, Algorithm: "sha512"},
 	}
 
-	_, err := disp.Dispatch(fi, r, false)
+	_, err := disp.Dispatch(fi, r, nil, false)
 	if err == nil {
 		t.Fatal("expected error for unsupported algorithm")
 	}
@@ -710,7 +710,7 @@ func TestDispatchChecksumWithDest(t *testing.T) {
 		Action: rule.Action{Type: rule.ActionChecksum, Algorithm: "sha256", Dest: sidecar},
 	}
 
-	result, err := disp.Dispatch(fi, r, false)
+	result, err := disp.Dispatch(fi, r, nil, false)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}
@@ -745,7 +745,7 @@ func TestDispatchNotifyDesktop(t *testing.T) {
 		},
 	}
 
-	result, err := disp.Dispatch(fi, r, false)
+	result, err := disp.Dispatch(fi, r, nil, false)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}
@@ -774,7 +774,7 @@ func TestDispatchNotifyDefaultTitle(t *testing.T) {
 	}
 
 	// Should use "sortie" as default title
-	_, err := disp.Dispatch(fi, r, false)
+	_, err := disp.Dispatch(fi, r, nil, false)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}
@@ -799,7 +799,7 @@ func TestDispatchConvertMissingTool(t *testing.T) {
 		},
 	}
 
-	_, err := disp.Dispatch(fi, r, false)
+	_, err := disp.Dispatch(fi, r, nil, false)
 	if err == nil {
 		t.Fatal("expected error for missing tool")
 	}
@@ -824,7 +824,7 @@ func TestDispatchConvertRequiresTool(t *testing.T) {
 		},
 	}
 
-	_, err := disp.Dispatch(fi, r, false)
+	_, err := disp.Dispatch(fi, r, nil, false)
 	if err == nil {
 		t.Fatal("expected error when tool field is empty")
 	}
@@ -850,7 +850,7 @@ func TestDispatchWatermarkMissingOverlay(t *testing.T) {
 		},
 	}
 
-	_, err := disp.Dispatch(fi, r, false)
+	_, err := disp.Dispatch(fi, r, nil, false)
 	if err == nil {
 		t.Fatal("expected error for missing overlay")
 	}
@@ -876,7 +876,7 @@ func TestDispatchWatermarkMissingTool(t *testing.T) {
 		},
 	}
 
-	_, err := disp.Dispatch(fi, r, false)
+	_, err := disp.Dispatch(fi, r, nil, false)
 	if err == nil {
 		t.Fatal("expected error for missing tool")
 	}
@@ -898,7 +898,7 @@ func TestDispatchOCRMissingTool(t *testing.T) {
 		},
 	}
 
-	_, err := disp.Dispatch(fi, r, false)
+	_, err := disp.Dispatch(fi, r, nil, false)
 	if err == nil {
 		t.Fatal("expected error for missing tool")
 	}
@@ -921,7 +921,7 @@ func TestDispatchEncryptMissingRecipient(t *testing.T) {
 		},
 	}
 
-	_, err := disp.Dispatch(fi, r, false)
+	_, err := disp.Dispatch(fi, r, nil, false)
 	if err == nil {
 		t.Fatal("expected error for missing recipient")
 	}
@@ -947,7 +947,7 @@ func TestDispatchEncryptMissingTool(t *testing.T) {
 		},
 	}
 
-	_, err := disp.Dispatch(fi, r, false)
+	_, err := disp.Dispatch(fi, r, nil, false)
 	if err == nil {
 		t.Fatal("expected error for missing tool")
 	}
@@ -970,7 +970,7 @@ func TestDispatchDecryptMissingTool(t *testing.T) {
 		},
 	}
 
-	_, err := disp.Dispatch(fi, r, false)
+	_, err := disp.Dispatch(fi, r, nil, false)
 	if err == nil {
 		t.Fatal("expected error for missing tool")
 	}
@@ -1026,7 +1026,7 @@ func TestDispatchEncryptDecryptRoundTrip(t *testing.T) {
 		},
 	}
 
-	encResult, err := disp.Dispatch(fi, encRule, false)
+	encResult, err := disp.Dispatch(fi, encRule, nil, false)
 	if err != nil {
 		t.Fatalf("Encrypt error: %v", err)
 	}
@@ -1057,7 +1057,7 @@ func TestDispatchEncryptDecryptRoundTrip(t *testing.T) {
 		},
 	}
 
-	_, err = disp.Dispatch(encFi, decRule, false)
+	_, err = disp.Dispatch(encFi, decRule, nil, false)
 	if err != nil {
 		t.Fatalf("Decrypt error: %v", err)
 	}
@@ -1095,7 +1095,7 @@ func TestDispatchUploadMissingRemote(t *testing.T) {
 		},
 	}
 
-	_, err := disp.Dispatch(fi, r, false)
+	_, err := disp.Dispatch(fi, r, nil, false)
 	if err == nil {
 		t.Fatal("expected error for missing remote")
 	}
@@ -1137,7 +1137,7 @@ func TestDispatchTagMissingTags(t *testing.T) {
 		},
 	}
 
-	_, err := disp.Dispatch(fi, r, false)
+	_, err := disp.Dispatch(fi, r, nil, false)
 	if err == nil {
 		t.Fatal("expected error for missing tags")
 	}
@@ -1187,7 +1187,7 @@ func TestDispatchTagWithXattr(t *testing.T) {
 		},
 	}
 
-	result, err := disp.Dispatch(fi, r, false)
+	result, err := disp.Dispatch(fi, r, nil, false)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}

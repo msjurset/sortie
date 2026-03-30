@@ -20,8 +20,8 @@ func lookPathOrError(tool, actionType string) error {
 }
 
 // doExec runs an arbitrary shell command with template-expanded variables.
-func doExec(fi rule.FileInfo, action rule.Action) error {
-	cmd, err := rule.ExpandString(action.Command, fi)
+func doExec(fi rule.FileInfo, action rule.Action, captures map[string]string) error {
+	cmd, err := rule.ExpandString(action.Command, fi, captures)
 	if err != nil {
 		return fmt.Errorf("expanding command template: %w", err)
 	}
@@ -36,13 +36,13 @@ func doExec(fi rule.FileInfo, action rule.Action) error {
 // doNotify sends a notification. On macOS, it uses osascript for desktop
 // notifications. If the message field starts with http:// or https://, it
 // sends an HTTP POST with file metadata as JSON.
-func doNotify(fi rule.FileInfo, action rule.Action) error {
-	title, err := rule.ExpandString(action.Title, fi)
+func doNotify(fi rule.FileInfo, action rule.Action, captures map[string]string) error {
+	title, err := rule.ExpandString(action.Title, fi, captures)
 	if err != nil {
 		return fmt.Errorf("expanding title template: %w", err)
 	}
 
-	message, err := rule.ExpandString(action.Message, fi)
+	message, err := rule.ExpandString(action.Message, fi, captures)
 	if err != nil {
 		return fmt.Errorf("expanding message template: %w", err)
 	}

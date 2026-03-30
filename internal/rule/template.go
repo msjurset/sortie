@@ -11,24 +11,26 @@ import (
 
 // TemplateData holds the variables available in destination path templates.
 type TemplateData struct {
-	Name  string // filename without extension
-	Ext   string // extension including dot
-	Path  string // full source file path
-	Year  string // 4-digit year from mod time
-	Month string // 2-digit month
-	Day   string // 2-digit day
-	Date  string // YYYY-MM-DD
-	Time  string // HH-MM-SS
+	Name  string            // filename without extension
+	Ext   string            // extension including dot
+	Path  string            // full source file path
+	Year  string            // 4-digit year from mod time
+	Month string            // 2-digit month
+	Day   string            // 2-digit day
+	Date  string            // YYYY-MM-DD
+	Time  string            // HH-MM-SS
+	Match map[string]string // named captures from content_regex
 }
 
-// ExpandTemplate expands a destination path template using the file's metadata.
+// ExpandTemplate expands a destination path template using the file's metadata
+// and optional named captures from content_regex matching.
 // If the resulting path already exists, a counter suffix is appended.
-func ExpandTemplate(tmpl string, fi FileInfo) (string, error) {
+func ExpandTemplate(tmpl string, fi FileInfo, captures ...map[string]string) (string, error) {
 	name := fi.Info.Name()
 	ext := filepath.Ext(name)
 	base := strings.TrimSuffix(name, ext)
 
-	data := templateData(fi, base, ext)
+	data := templateData(fi, base, ext, captures...)
 
 	t, err := template.New("dest").Parse(tmpl)
 	if err != nil {
@@ -51,10 +53,10 @@ func ExpandTemplate(tmpl string, fi FileInfo) (string, error) {
 	return resolveConflict(dest, ext), nil
 }
 
-// ExpandString expands a template string using the file's metadata without
-// conflict resolution or directory-append logic. Use this for non-path fields
-// like Command, Message, Args, and Remote.
-func ExpandString(tmpl string, fi FileInfo) (string, error) {
+// ExpandString expands a template string using the file's metadata and optional
+// named captures without conflict resolution or directory-append logic. Use
+// this for non-path fields like Command, Message, Args, and Remote.
+func ExpandString(tmpl string, fi FileInfo, captures ...map[string]string) (string, error) {
 	if tmpl == "" {
 		return "", nil
 	}
@@ -63,7 +65,7 @@ func ExpandString(tmpl string, fi FileInfo) (string, error) {
 	ext := filepath.Ext(name)
 	base := strings.TrimSuffix(name, ext)
 
-	data := templateData(fi, base, ext)
+	data := templateData(fi, base, ext, captures...)
 
 	t, err := template.New("str").Parse(tmpl)
 	if err != nil {
@@ -78,8 +80,12 @@ func ExpandString(tmpl string, fi FileInfo) (string, error) {
 	return buf.String(), nil
 }
 
-func templateData(fi FileInfo, base, ext string) TemplateData {
+func templateData(fi FileInfo, base, ext string, captures ...map[string]string) TemplateData {
 	modTime := fi.Info.ModTime()
+	var m map[string]string
+	if len(captures) > 0 && captures[0] != nil {
+		m = captures[0]
+	}
 	return TemplateData{
 		Name:  base,
 		Ext:   ext,
@@ -89,6 +95,7 @@ func templateData(fi FileInfo, base, ext string) TemplateData {
 		Day:   modTime.Format("02"),
 		Date:  modTime.Format("2006-01-02"),
 		Time:  modTime.Format("15-04-05"),
+		Match: m,
 	}
 }
 

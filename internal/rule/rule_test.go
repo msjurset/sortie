@@ -281,6 +281,230 @@ func TestContentMatch(t *testing.T) {
 	})
 }
 
+func TestContentCaptures(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+
+	content := "Invoice #12345 from Acme Corp dated 2026-03-15"
+	path := filepath.Join(dir, "invoice.pdf")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, now, now); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := NewFileInfo(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("named groups captured", func(t *testing.T) {
+		r := Rule{Name: "test", Match: Match{
+			ContentRegex: `(?P<company>Acme Corp).*(?P<date>\d{4}-\d{2}-\d{2})`,
+		}}
+		ok, captures := r.MatchWithCaptures(fi)
+		if !ok {
+			t.Fatal("expected match")
+		}
+		if captures["company"] != "Acme Corp" {
+			t.Errorf("company = %q, want %q", captures["company"], "Acme Corp")
+		}
+		if captures["date"] != "2026-03-15" {
+			t.Errorf("date = %q, want %q", captures["date"], "2026-03-15")
+		}
+	})
+
+	t.Run("no named groups returns nil captures", func(t *testing.T) {
+		r := Rule{Name: "test", Match: Match{
+			ContentRegex: `Invoice #\d+`,
+		}}
+		ok, captures := r.MatchWithCaptures(fi)
+		if !ok {
+			t.Fatal("expected match")
+		}
+		if captures != nil {
+			t.Errorf("expected nil captures for unnamed groups, got %v", captures)
+		}
+	})
+
+	t.Run("captures with content AND content_regex", func(t *testing.T) {
+		r := Rule{Name: "test", Match: Match{
+			Content:      "invoice",
+			ContentRegex: `from (?P<company>[A-Za-z ]+) dated`,
+		}}
+		ok, captures := r.MatchWithCaptures(fi)
+		if !ok {
+			t.Fatal("expected match")
+		}
+		if captures["company"] != "Acme Corp" {
+			t.Errorf("company = %q, want %q", captures["company"], "Acme Corp")
+		}
+	})
+
+	t.Run("FindMatches propagates captures", func(t *testing.T) {
+		rules := []Rule{
+			{Name: "invoices", Match: Match{
+				ContentRegex: `from (?P<company>[A-Za-z ]+) dated (?P<date>\d{4}-\d{2}-\d{2})`,
+			}},
+		}
+		results := FindMatches(rules, fi)
+		if len(results) != 1 {
+			t.Fatalf("expected 1 match, got %d", len(results))
+		}
+		if results[0].Captures["company"] != "Acme Corp" {
+			t.Errorf("company = %q, want %q", results[0].Captures["company"], "Acme Corp")
+		}
+		if results[0].Captures["date"] != "2026-03-15" {
+			t.Errorf("date = %q, want %q", results[0].Captures["date"], "2026-03-15")
+		}
+	})
+
+	t.Run("optional group captured independently", func(t *testing.T) {
+		// Company appears after the date anchor — a single FindStringSubmatch
+		// with an optional group would miss it due to RE2 leftmost match.
+		// The independent retry should find it.
+		content2 := "Invoice dated 2026-04-01 from Oracle for cloud services"
+		path2 := filepath.Join(dir, "oracle-invoice.pdf")
+		if err := os.WriteFile(path2, []byte(content2), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path2, now, now); err != nil {
+			t.Fatal(err)
+		}
+		fi2, err := NewFileInfo(path2)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		r := Rule{Name: "test", Match: Match{
+			ContentRegex: `(?P<company>Oracle|AWS)?.*(?P<date>\d{4}-\d{2}-\d{2})`,
+		}}
+		ok, captures := r.MatchWithCaptures(fi2)
+		if !ok {
+			t.Fatal("expected match")
+		}
+		if captures["date"] != "2026-04-01" {
+			t.Errorf("date = %q, want %q", captures["date"], "2026-04-01")
+		}
+		if captures["company"] != "Oracle" {
+			t.Errorf("company = %q, want %q (should be found via independent search)", captures["company"], "Oracle")
+		}
+	})
+
+	t.Run("missing optional group stays empty", func(t *testing.T) {
+		// Unknown company should result in empty capture
+		content3 := "Invoice dated 2026-05-01 from Unknown Corp"
+		path3 := filepath.Join(dir, "unknown-invoice.pdf")
+		if err := os.WriteFile(path3, []byte(content3), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path3, now, now); err != nil {
+			t.Fatal(err)
+		}
+		fi3, err := NewFileInfo(path3)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		r := Rule{Name: "test", Match: Match{
+			ContentRegex: `(?P<company>Oracle|AWS)?.*(?P<date>\d{4}-\d{2}-\d{2})`,
+		}}
+		ok, captures := r.MatchWithCaptures(fi3)
+		if !ok {
+			t.Fatal("expected match")
+		}
+		if captures["date"] != "2026-05-01" {
+			t.Errorf("date = %q, want %q", captures["date"], "2026-05-01")
+		}
+		if captures["company"] != "" {
+			t.Errorf("company = %q, want empty (unknown vendor)", captures["company"])
+		}
+	})
+}
+
+func TestIsPDF(t *testing.T) {
+	dir := t.TempDir()
+
+	t.Run("real PDF magic bytes", func(t *testing.T) {
+		path := filepath.Join(dir, "real.pdf")
+		os.WriteFile(path, []byte("%PDF-1.4 fake pdf content"), 0o644)
+		if !isPDF(path) {
+			t.Error("expected isPDF=true for file with %PDF- magic bytes")
+		}
+	})
+
+	t.Run("plain text with pdf extension", func(t *testing.T) {
+		path := filepath.Join(dir, "fake.pdf")
+		os.WriteFile(path, []byte("This is plain text, not a PDF"), 0o644)
+		if isPDF(path) {
+			t.Error("expected isPDF=false for plain text file with .pdf extension")
+		}
+	})
+
+	t.Run("non-pdf file", func(t *testing.T) {
+		path := filepath.Join(dir, "readme.txt")
+		os.WriteFile(path, []byte("hello world"), 0o644)
+		if isPDF(path) {
+			t.Error("expected isPDF=false for .txt file")
+		}
+	})
+}
+
+func TestNormalizeDate(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"2026-03-15", "2026-03-15"},
+		{"28-FEB-2026", "2026-02-28"},
+		{"28-Feb-2026", "2026-02-28"},
+		{"March 6, 2026", "2026-03-06"},
+		{"March 15, 2026", "2026-03-15"},
+		{"Jan 1, 2026", "2026-01-01"},
+		{"03/15/2026", "2026-03-15"},
+		{"3/6/2026", "2026-03-06"},
+		{"not a date", ""},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := normalizeDate(tt.input)
+			if got != tt.want {
+				t.Errorf("normalizeDate(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtractNamedGroup(t *testing.T) {
+	tests := []struct {
+		name    string
+		pattern string
+		group   string
+		wantNil bool
+	}{
+		{"simple group", `(?P<date>\d{4}-\d{2}-\d{2})`, "date", false},
+		{"group with character class parens", `(?P<val>[()]+)`, "val", false},
+		{"group with escaped paren", `(?P<val>\(\))`, "val", false},
+		{"nested groups", `(?P<outer>abc(?:def))`, "outer", false},
+		{"missing group", `(?P<date>\d+)`, "company", true},
+		{"group with brackets and parens", `(?P<x>[a-z(]+)`, "x", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			re := extractNamedGroup(tt.pattern, tt.group)
+			if tt.wantNil && re != nil {
+				t.Errorf("expected nil, got %v", re)
+			}
+			if !tt.wantNil && re == nil {
+				t.Errorf("expected non-nil regex for group %q in pattern %q", tt.group, tt.pattern)
+			}
+		})
+	}
+}
+
 func TestFirstMatch(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now()
@@ -308,8 +532,8 @@ func TestFirstMatch(t *testing.T) {
 			if matched == nil {
 				t.Fatal("expected a match, got nil")
 			}
-			if matched.Name != tt.wantRule {
-				t.Errorf("FirstMatch() matched %q, want %q", matched.Name, tt.wantRule)
+			if matched.Rule.Name != tt.wantRule {
+				t.Errorf("FirstMatch() matched %q, want %q", matched.Rule.Name, tt.wantRule)
 			}
 			os.Remove(fi.Path)
 		})
@@ -329,7 +553,7 @@ func TestFirstMatchPriority(t *testing.T) {
 		defer os.Remove(fi.Path)
 
 		matched := FirstMatch(rules, fi)
-		if matched == nil || matched.Name != "pdfs" {
+		if matched == nil || matched.Rule.Name != "pdfs" {
 			t.Errorf("expected pdfs (priority 10), got %v", matched)
 		}
 	})
@@ -343,7 +567,7 @@ func TestFirstMatchPriority(t *testing.T) {
 		defer os.Remove(fi.Path)
 
 		matched := FirstMatch(rules, fi)
-		if matched == nil || matched.Name != "first" {
+		if matched == nil || matched.Rule.Name != "first" {
 			t.Errorf("expected first (same priority, declared first), got %v", matched)
 		}
 	})
@@ -357,7 +581,7 @@ func TestFirstMatchPriority(t *testing.T) {
 		defer os.Remove(fi.Path)
 
 		matched := FirstMatch(rules, fi)
-		if matched == nil || matched.Name != "images" {
+		if matched == nil || matched.Rule.Name != "images" {
 			t.Errorf("expected images (declared first, both priority 0), got %v", matched)
 		}
 	})
@@ -372,7 +596,7 @@ func TestFirstMatchPriority(t *testing.T) {
 		defer os.Remove(fi.Path)
 
 		matched := FirstMatch(rules, fi)
-		if matched == nil || matched.Name != "per-dir-rule" {
+		if matched == nil || matched.Rule.Name != "per-dir-rule" {
 			t.Errorf("expected per-dir-rule (first in slice at same priority), got %v", matched)
 		}
 	})
@@ -386,7 +610,7 @@ func TestFirstMatchPriority(t *testing.T) {
 		defer os.Remove(fi.Path)
 
 		matched := FirstMatch(rules, fi)
-		if matched == nil || matched.Name != "normal" {
+		if matched == nil || matched.Rule.Name != "normal" {
 			t.Errorf("expected normal (priority 0 > -1), got %v", matched)
 		}
 	})
@@ -408,8 +632,8 @@ func TestFindMatchesContinue(t *testing.T) {
 		if len(matches) != 1 {
 			t.Fatalf("expected 1 match, got %d", len(matches))
 		}
-		if matches[0].Name != "first" {
-			t.Errorf("expected first, got %s", matches[0].Name)
+		if matches[0].Rule.Name != "first" {
+			t.Errorf("expected first, got %s", matches[0].Rule.Name)
 		}
 	})
 
@@ -425,11 +649,11 @@ func TestFindMatchesContinue(t *testing.T) {
 		if len(matches) != 2 {
 			t.Fatalf("expected 2 matches, got %d", len(matches))
 		}
-		if matches[0].Name != "notify" {
-			t.Errorf("first match should be notify, got %s", matches[0].Name)
+		if matches[0].Rule.Name != "notify" {
+			t.Errorf("first match should be notify, got %s", matches[0].Rule.Name)
 		}
-		if matches[1].Name != "move" {
-			t.Errorf("second match should be move, got %s", matches[1].Name)
+		if matches[1].Rule.Name != "move" {
+			t.Errorf("second match should be move, got %s", matches[1].Rule.Name)
 		}
 	})
 
@@ -446,8 +670,8 @@ func TestFindMatchesContinue(t *testing.T) {
 		if len(matches) != 2 {
 			t.Fatalf("expected 2 matches (stop at second which has no continue), got %d", len(matches))
 		}
-		if matches[1].Name != "second" {
-			t.Errorf("second match should be second, got %s", matches[1].Name)
+		if matches[1].Rule.Name != "second" {
+			t.Errorf("second match should be second, got %s", matches[1].Rule.Name)
 		}
 	})
 
@@ -464,11 +688,11 @@ func TestFindMatchesContinue(t *testing.T) {
 		if len(matches) != 2 {
 			t.Fatalf("expected 2 matches (notify + catch-all, skip pdfs), got %d", len(matches))
 		}
-		if matches[0].Name != "notify-all" {
-			t.Errorf("first should be notify-all, got %s", matches[0].Name)
+		if matches[0].Rule.Name != "notify-all" {
+			t.Errorf("first should be notify-all, got %s", matches[0].Rule.Name)
 		}
-		if matches[1].Name != "catch-all" {
-			t.Errorf("second should be catch-all, got %s", matches[1].Name)
+		if matches[1].Rule.Name != "catch-all" {
+			t.Errorf("second should be catch-all, got %s", matches[1].Rule.Name)
 		}
 	})
 
@@ -485,11 +709,11 @@ func TestFindMatchesContinue(t *testing.T) {
 			t.Fatalf("expected 2 matches, got %d", len(matches))
 		}
 		// high-pri fires first (sorted by priority), then falls through to low-pri
-		if matches[0].Name != "high-pri" {
-			t.Errorf("first should be high-pri, got %s", matches[0].Name)
+		if matches[0].Rule.Name != "high-pri" {
+			t.Errorf("first should be high-pri, got %s", matches[0].Rule.Name)
 		}
-		if matches[1].Name != "low-pri" {
-			t.Errorf("second should be low-pri, got %s", matches[1].Name)
+		if matches[1].Rule.Name != "low-pri" {
+			t.Errorf("second should be low-pri, got %s", matches[1].Rule.Name)
 		}
 	})
 

@@ -19,7 +19,7 @@ _sortie() {
         if [[ "$cur" == -* ]]; then
             COMPREPLY=($(compgen -W "--dry-run --rate-limit --help" -- "$cur"))
         else
-            COMPREPLY=($(compgen -d -- "$cur"))
+            COMPREPLY=($(compgen -f -- "$cur"))
         fi
         ;;
     watch)

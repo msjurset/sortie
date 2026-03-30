@@ -28,7 +28,7 @@ func TestDispatchOpenDefault(t *testing.T) {
 		Action: rule.Action{Type: rule.ActionOpen},
 	}
 
-	result, err := disp.Dispatch(fi, r, false)
+	result, err := disp.Dispatch(fi, r, nil, false)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestDispatchOpenWithApp(t *testing.T) {
 		Action: rule.Action{Type: rule.ActionOpen, App: "TextEdit"},
 	}
 
-	result, err := disp.Dispatch(fi, r, false)
+	result, err := disp.Dispatch(fi, r, nil, false)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestDispatchDeduplicateNoDuplicate(t *testing.T) {
 		Action: rule.Action{Type: rule.ActionDeduplicate, Dest: destPath},
 	}
 
-	result, err := disp.Dispatch(fi, r, false)
+	result, err := disp.Dispatch(fi, r, nil, false)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestDispatchDeduplicateSkip(t *testing.T) {
 		Action: rule.Action{Type: rule.ActionDeduplicate, Dest: destPath},
 	}
 
-	result, err := disp.Dispatch(fi, r, false)
+	result, err := disp.Dispatch(fi, r, nil, false)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestDispatchDeduplicateDelete(t *testing.T) {
 		Action: rule.Action{Type: rule.ActionDeduplicate, Dest: destPath, OnDuplicate: "delete"},
 	}
 
-	result, err := disp.Dispatch(fi, r, false)
+	result, err := disp.Dispatch(fi, r, nil, false)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestDispatchDeduplicateDifferentContent(t *testing.T) {
 		Action: rule.Action{Type: rule.ActionDeduplicate, Dest: destPath},
 	}
 
-	result, err := disp.Dispatch(fi, r, false)
+	result, err := disp.Dispatch(fi, r, nil, false)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestDispatchDeduplicateMissingDest(t *testing.T) {
 		Action: rule.Action{Type: rule.ActionDeduplicate},
 	}
 
-	_, err := disp.Dispatch(fi, r, false)
+	_, err := disp.Dispatch(fi, r, nil, false)
 	if err == nil {
 		t.Fatal("expected error for missing dest")
 	}
@@ -240,7 +240,7 @@ func TestUndoDeduplicateMoved(t *testing.T) {
 		Action: rule.Action{Type: rule.ActionDeduplicate, Dest: destPath},
 	}
 
-	result, err := disp.Dispatch(fi, r, false)
+	result, err := disp.Dispatch(fi, r, nil, false)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}
@@ -301,7 +301,7 @@ func TestDispatchUnquarantine(t *testing.T) {
 		Action: rule.Action{Type: rule.ActionUnquarantine},
 	}
 
-	result, err := disp.Dispatch(fi, r, false)
+	result, err := disp.Dispatch(fi, r, nil, false)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}
@@ -333,7 +333,7 @@ func TestDispatchUnquarantineNoAttr(t *testing.T) {
 	}
 
 	// Should succeed even if no quarantine attribute present
-	_, err := disp.Dispatch(fi, r, false)
+	_, err := disp.Dispatch(fi, r, nil, false)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}

@@ -12,7 +12,7 @@ import (
 
 // doConvert runs an external converter tool with the given arguments template.
 // The source file is preserved; output goes to dest.
-func doConvert(fi rule.FileInfo, action rule.Action, dest string) error {
+func doConvert(fi rule.FileInfo, action rule.Action, dest string, captures map[string]string) error {
 	tool := action.Tool
 	if tool == "" {
 		return fmt.Errorf("convert action requires tool field (e.g., ffmpeg, convert, pandoc)")
@@ -26,7 +26,7 @@ func doConvert(fi rule.FileInfo, action rule.Action, dest string) error {
 		return fmt.Errorf("creating directory: %w", err)
 	}
 
-	args, err := rule.ExpandString(action.Args, fi)
+	args, err := rule.ExpandString(action.Args, fi, captures)
 	if err != nil {
 		return fmt.Errorf("expanding args template: %w", err)
 	}

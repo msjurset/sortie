@@ -69,6 +69,9 @@ func validateRule(r Rule, watchedDirs []WatchedDir) []Finding {
 	// Validate match conditions
 	findings = append(findings, ValidateMatch(r.Name, r.Match)...)
 
+	// Validate that {{.Match.}} templates have corresponding capture groups
+	findings = append(findings, validateCaptureRefs(r)...)
+
 	// Validate cooldown
 	if r.Cooldown != "" {
 		if _, err := ParseAge(r.Cooldown); err != nil {
@@ -411,6 +414,77 @@ func ValidateIgnorePatterns(patterns []string, source string) []Finding {
 			})
 		}
 	}
+	return findings
+}
+
+// validateCaptureRefs checks that templates referencing {{.Match.}} have
+// corresponding named capture groups in content_regex.
+func validateCaptureRefs(r Rule) []Finding {
+	var findings []Finding
+
+	// Collect all template strings from actions
+	var templates []string
+	for _, a := range r.ResolvedActions() {
+		templates = append(templates, a.Dest, a.Command, a.Title, a.Message, a.Args, a.Remote)
+	}
+
+	// Check if any template references .Match.
+	usesMatch := false
+	for _, t := range templates {
+		if strings.Contains(t, ".Match.") {
+			usesMatch = true
+			break
+		}
+	}
+	if !usesMatch {
+		return nil
+	}
+
+	if r.Match.ContentRegex == "" {
+		findings = append(findings, Finding{
+			Severity: SeverityError,
+			Rule:     r.Name,
+			Message:  "templates reference {{.Match.}} but no content_regex is defined",
+		})
+		return findings
+	}
+
+	re, err := regexp.Compile(r.Match.ContentRegex)
+	if err != nil {
+		return nil // already caught by ValidateMatch
+	}
+
+	groupNames := map[string]bool{}
+	for _, name := range re.SubexpNames() {
+		if name != "" {
+			groupNames[name] = true
+		}
+	}
+
+	if len(groupNames) == 0 {
+		findings = append(findings, Finding{
+			Severity: SeverityError,
+			Rule:     r.Name,
+			Message:  "templates reference {{.Match.}} but content_regex has no named capture groups (use (?P<name>...))",
+		})
+		return findings
+	}
+
+	// Check each referenced name exists as a capture group
+	refRe := regexp.MustCompile(`\{\{[^}]*\.Match\.(\w+)`)
+	for _, t := range templates {
+		for _, m := range refRe.FindAllStringSubmatch(t, -1) {
+			name := m[1]
+			if !groupNames[name] {
+				findings = append(findings, Finding{
+					Severity: SeverityWarning,
+					Rule:     r.Name,
+					Message:  fmt.Sprintf("template references {{.Match.%s}} but content_regex has no group named %q", name, name),
+				})
+			}
+		}
+	}
+
 	return findings
 }
 

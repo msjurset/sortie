@@ -24,7 +24,7 @@ func TestDispatchChainNotifyThenMove(t *testing.T) {
 		},
 	}
 
-	result, err := disp.Dispatch(fi, r, false)
+	result, err := disp.Dispatch(fi, r, nil, false)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestDispatchChainMoveThenTag(t *testing.T) {
 		},
 	}
 
-	_, err := disp.Dispatch(fi, r, false)
+	_, err := disp.Dispatch(fi, r, nil, false)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestDispatchChainFilePathUpdatesAfterMove(t *testing.T) {
 		},
 	}
 
-	_, err := disp.Dispatch(fi, r, false)
+	_, err := disp.Dispatch(fi, r, nil, false)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestDispatchChainDryRun(t *testing.T) {
 		},
 	}
 
-	result, err := disp.Dispatch(fi, r, true)
+	result, err := disp.Dispatch(fi, r, nil, true)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestDispatchChainStopsOnError(t *testing.T) {
 		},
 	}
 
-	_, err := disp.Dispatch(fi, r, false)
+	_, err := disp.Dispatch(fi, r, nil, false)
 	if err == nil {
 		t.Fatal("expected error from failing exec")
 	}
@@ -212,7 +212,7 @@ func TestDispatchSingleActionNoChainID(t *testing.T) {
 		Action: rule.Action{Type: rule.ActionMove, Dest: destDir},
 	}
 
-	result, err := disp.Dispatch(fi, r, false)
+	result, err := disp.Dispatch(fi, r, nil, false)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestDispatchEmptyActionsError(t *testing.T) {
 
 	r := rule.Rule{Name: "empty"}
 
-	_, err := disp.Dispatch(fi, r, false)
+	_, err := disp.Dispatch(fi, r, nil, false)
 	if err == nil {
 		t.Fatal("expected error for rule with no actions")
 	}
@@ -288,7 +288,7 @@ func TestUndoChainRecords(t *testing.T) {
 		},
 	}
 
-	_, err := disp.Dispatch(fi, r, false)
+	_, err := disp.Dispatch(fi, r, nil, false)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}

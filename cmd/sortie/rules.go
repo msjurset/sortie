@@ -117,16 +117,22 @@ func runRulesTest(cmd *cobra.Command, args []string) error {
 		rules = cfg.Rules
 	}
 
-	matched := rule.FirstMatch(rules, fi)
-	if matched == nil {
+	mr := rule.FirstMatch(rules, fi)
+	if mr == nil {
 		fmt.Printf("No rule matches %s\n", fi.Info.Name())
 		return nil
 	}
 
 	fmt.Printf("File:   %s\n", fi.Info.Name())
-	fmt.Printf("Rule:   %s\n", matched.Name)
+	fmt.Printf("Rule:   %s\n", mr.Rule.Name)
 
-	actions := matched.ResolvedActions()
+	if len(mr.Captures) > 0 {
+		for k, v := range mr.Captures {
+			fmt.Printf("  Match.%s: %s\n", k, v)
+		}
+	}
+
+	actions := mr.Rule.ResolvedActions()
 	for i, a := range actions {
 		prefix := "Action"
 		if len(actions) > 1 {
@@ -134,7 +140,7 @@ func runRulesTest(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Printf("%s: %s\n", prefix, a.Type)
 		if a.Dest != "" {
-			dest, _ := rule.ExpandTemplate(a.Dest, fi)
+			dest, _ := rule.ExpandTemplate(a.Dest, fi, mr.Captures)
 			fmt.Printf("  Dest:   %s\n", dest)
 		}
 		if extra := summarizeAction(a); extra != "" {

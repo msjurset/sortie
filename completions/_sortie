@@ -3,7 +3,7 @@
 _sortie() {
     local -a commands
     commands=(
-        'scan:Scan directories and apply rules'
+        'scan:Scan directories or files and apply rules'
         'watch:Watch directories and dispatch files in real time'
         'history:Show action history'
         'undo:Reverse recent dispatch actions'
@@ -38,7 +38,7 @@ _sortie() {
                 '(- *)--help[Show help]' \
                 '--dry-run[Preview actions without executing]' \
                 '--rate-limit=[Max actions per second]:rate:' \
-                '*:directory:_directories'
+                '*:path:_files'
             ;;
         watch)
             _arguments \
@@ -152,7 +152,7 @@ _sortie() {
         help)
             local -a help_topics
             help_topics=(
-                'scan:Scan directories and apply rules'
+                'scan:Scan directories or files and apply rules'
                 'watch:Watch directories and dispatch files in real time'
                 'history:Show action history'
                 'undo:Reverse recent dispatch actions'

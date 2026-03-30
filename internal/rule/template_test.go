@@ -122,3 +122,58 @@ func TestExpandString(t *testing.T) {
 		})
 	}
 }
+
+func TestExpandTemplateWithCaptures(t *testing.T) {
+	dir := t.TempDir()
+	modTime := time.Date(2026, 3, 18, 14, 30, 45, 0, time.UTC)
+
+	fi := testFile(t, dir, "download.pdf", 1024, modTime)
+
+	captures := map[string]string{
+		"company": "acme",
+		"date":    "2026-03-15",
+	}
+
+	t.Run("captures in dest path", func(t *testing.T) {
+		tmpl := filepath.Join(dir, "out", "invoice-{{.Match.company}}-{{.Match.date}}{{.Ext}}")
+		got, err := ExpandTemplate(tmpl, fi, captures)
+		if err != nil {
+			t.Fatalf("ExpandTemplate() error: %v", err)
+		}
+		want := filepath.Join(dir, "out", "invoice-acme-2026-03-15.pdf")
+		if got != want {
+			t.Errorf("ExpandTemplate() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("nil captures works", func(t *testing.T) {
+		tmpl := filepath.Join(dir, "out", "{{.Name}}{{.Ext}}")
+		got, err := ExpandTemplate(tmpl, fi)
+		if err != nil {
+			t.Fatalf("ExpandTemplate() error: %v", err)
+		}
+		want := filepath.Join(dir, "out", "download.pdf")
+		if got != want {
+			t.Errorf("ExpandTemplate() = %q, want %q", got, want)
+		}
+	})
+}
+
+func TestExpandStringWithCaptures(t *testing.T) {
+	dir := t.TempDir()
+	modTime := time.Date(2026, 3, 18, 14, 30, 45, 0, time.UTC)
+
+	fi := testFile(t, dir, "report.pdf", 1024, modTime)
+
+	captures := map[string]string{
+		"company": "globex",
+	}
+
+	got, err := ExpandString("Invoice from {{.Match.company}}", fi, captures)
+	if err != nil {
+		t.Fatalf("ExpandString() error: %v", err)
+	}
+	if got != "Invoice from globex" {
+		t.Errorf("ExpandString() = %q, want %q", got, "Invoice from globex")
+	}
+}

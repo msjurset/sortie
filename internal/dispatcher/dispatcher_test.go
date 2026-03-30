@@ -43,7 +43,7 @@ func TestDispatchMove(t *testing.T) {
 		Action: rule.Action{Type: rule.ActionMove, Dest: destDir},
 	}
 
-	result, err := disp.Dispatch(fi, r, false)
+	result, err := disp.Dispatch(fi, r, nil, false)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestDispatchCopy(t *testing.T) {
 		Action: rule.Action{Type: rule.ActionCopy, Dest: destDir},
 	}
 
-	result, err := disp.Dispatch(fi, r, false)
+	result, err := disp.Dispatch(fi, r, nil, false)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestDispatchDryRun(t *testing.T) {
 		Action: rule.Action{Type: rule.ActionMove, Dest: destDir},
 	}
 
-	result, err := disp.Dispatch(fi, r, true)
+	result, err := disp.Dispatch(fi, r, nil, true)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestDispatchDelete(t *testing.T) {
 		Action: rule.Action{Type: rule.ActionDelete},
 	}
 
-	result, err := disp.Dispatch(fi, r, false)
+	result, err := disp.Dispatch(fi, r, nil, false)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestDispatchCompress(t *testing.T) {
 		Action: rule.Action{Type: rule.ActionCompress, Dest: destDir},
 	}
 
-	result, err := disp.Dispatch(fi, r, false)
+	result, err := disp.Dispatch(fi, r, nil, false)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}
@@ -213,7 +213,7 @@ func TestDispatchRename(t *testing.T) {
 	// For rename test, use a simple non-template dest
 	r.Action.Dest = destPath
 
-	result, err := disp.Dispatch(fi, r, false)
+	result, err := disp.Dispatch(fi, r, nil, false)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}
@@ -247,7 +247,7 @@ func TestUndoMove(t *testing.T) {
 		Action: rule.Action{Type: rule.ActionMove, Dest: destDir},
 	}
 
-	result, err := disp.Dispatch(fi, r, false)
+	result, err := disp.Dispatch(fi, r, nil, false)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}
@@ -284,7 +284,7 @@ func TestUndoCopy(t *testing.T) {
 		Action: rule.Action{Type: rule.ActionCopy, Dest: destDir},
 	}
 
-	result, err := disp.Dispatch(fi, r, false)
+	result, err := disp.Dispatch(fi, r, nil, false)
 	if err != nil {
 		t.Fatalf("Dispatch() error: %v", err)
 	}

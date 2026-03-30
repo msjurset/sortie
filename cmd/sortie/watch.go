@@ -122,13 +122,13 @@ func runWatch(cmd *cobra.Command, args []string) error {
 			return
 		}
 
-		for _, matched := range matches {
+		for _, mr := range matches {
 			// Check per-rule cooldown
-			if matched.Cooldown != "" {
-				cd, _ := rule.ParseAge(matched.Cooldown)
-				if !rl.AllowRule(matched.Name, cd) {
+			if mr.Rule.Cooldown != "" {
+				cd, _ := rule.ParseAge(mr.Rule.Cooldown)
+				if !rl.AllowRule(mr.Rule.Name, cd) {
 					if verbose {
-						logger.Debug("cooldown", "rule", matched.Name, "cooldown", matched.Cooldown)
+						logger.Debug("cooldown", "rule", mr.Rule.Name, "cooldown", mr.Rule.Cooldown)
 					}
 					continue
 				}
@@ -139,16 +139,16 @@ func runWatch(cmd *cobra.Command, args []string) error {
 				return
 			}
 
-			result, err := disp.Dispatch(fi, *matched, watchFlags.dryRun)
+			result, err := disp.Dispatch(fi, *mr.Rule, mr.Captures, watchFlags.dryRun)
 			if err != nil {
 				logger.Error("dispatch failed", "err", err)
 				continue
 			}
 
-			rl.Record(matched.Name)
+			rl.Record(mr.Rule.Name)
 
 			logger.Info("dispatched",
-				"rule", matched.Name,
+				"rule", mr.Rule.Name,
 				"action", result.Record.Action,
 				"src", filepath.Base(result.Record.Src),
 				"dest", result.Record.Dest,
