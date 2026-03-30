@@ -2,7 +2,7 @@ package watcher
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -12,7 +12,7 @@ import (
 
 func TestWatcherDetectsNewFile(t *testing.T) {
 	dir := t.TempDir()
-	logger := log.New(os.Stderr, "", 0)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
 	w, err := New([]string{dir}, 100*time.Millisecond, logger)
 	if err != nil {
@@ -63,7 +63,7 @@ func TestWatcherDetectsNewFile(t *testing.T) {
 
 func TestWatcherIgnoresDotfiles(t *testing.T) {
 	dir := t.TempDir()
-	logger := log.New(os.Stderr, "", 0)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
 	w, err := New([]string{dir}, 100*time.Millisecond, logger)
 	if err != nil {
@@ -113,7 +113,7 @@ func TestWatcherIgnoresDotfiles(t *testing.T) {
 
 func TestWatcherDebounce(t *testing.T) {
 	dir := t.TempDir()
-	logger := log.New(os.Stderr, "", 0)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
 	w, err := New([]string{dir}, 200*time.Millisecond, logger)
 	if err != nil {

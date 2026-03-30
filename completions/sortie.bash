@@ -2,8 +2,8 @@ _sortie() {
     local cur prev words cword
     _init_completion || return
 
-    local commands="scan watch history undo rules config status trash validate man help completion"
-    local global_flags="--help --version --config --verbose -v"
+    local commands="scan watch history undo rules config status trash validate actions man help completion"
+    local global_flags="--help --version --config --log-format --verbose -v"
 
     if [[ $cword -eq 1 ]]; then
         if [[ "$cur" == -* ]]; then
@@ -17,14 +17,14 @@ _sortie() {
     case "${words[1]}" in
     scan)
         if [[ "$cur" == -* ]]; then
-            COMPREPLY=($(compgen -W "--dry-run --help" -- "$cur"))
+            COMPREPLY=($(compgen -W "--dry-run --rate-limit --help" -- "$cur"))
         else
             COMPREPLY=($(compgen -d -- "$cur"))
         fi
         ;;
     watch)
         if [[ "$cur" == -* ]]; then
-            COMPREPLY=($(compgen -W "--dry-run --debounce --help" -- "$cur"))
+            COMPREPLY=($(compgen -W "--dry-run --debounce --rate-limit --help" -- "$cur"))
         fi
         ;;
     history)
@@ -63,6 +63,24 @@ _sortie() {
             COMPREPLY=($(compgen -W "--global --help" -- "$cur"))
         else
             COMPREPLY=($(compgen -d -- "$cur"))
+        fi
+        ;;
+    status)
+        if [[ "$cur" == -* ]]; then
+            COMPREPLY=($(compgen -W "--watch --help" -- "$cur"))
+        fi
+        ;;
+    actions)
+        if [[ "$cur" == -* ]]; then
+            COMPREPLY=($(compgen -W "--help" -- "$cur"))
+        elif [[ $cword -eq 2 ]]; then
+            COMPREPLY=($(compgen -W "move copy rename delete compress extract symlink chmod checksum exec notify convert resize watermark ocr encrypt decrypt upload tag open deduplicate unquarantine" -- "$cur"))
+        fi
+        ;;
+    help)
+        if [[ $cword -eq 2 ]]; then
+            local help_topics="scan watch history undo rules config status trash actions validate man move copy rename delete compress extract symlink chmod checksum exec notify convert resize watermark ocr encrypt decrypt upload tag open deduplicate unquarantine"
+            COMPREPLY=($(compgen -W "$help_topics" -- "$cur"))
         fi
         ;;
     completion)

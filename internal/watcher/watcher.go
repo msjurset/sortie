@@ -2,7 +2,7 @@ package watcher
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,11 +25,11 @@ type Watcher struct {
 	mu       sync.Mutex
 	timers   map[string]*time.Timer
 	handler  func(path string)
-	logger   *log.Logger
+	logger   *slog.Logger
 }
 
 // New creates a Watcher that monitors the given directories.
-func New(dirs []string, debounce time.Duration, logger *log.Logger) (*Watcher, error) {
+func New(dirs []string, debounce time.Duration, logger *slog.Logger) (*Watcher, error) {
 	fsw, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, err
@@ -70,7 +70,7 @@ func (w *Watcher) Run(ctx context.Context, handler func(path string)) error {
 			if !ok {
 				return nil
 			}
-			w.logger.Printf("watcher error: %v", err)
+			w.logger.Error("watcher error", "err", err)
 		}
 	}
 }

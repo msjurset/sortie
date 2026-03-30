@@ -13,6 +13,13 @@ Intelligent file dispatcher — rule-based file routing for directories like `~/
 - **Template destinations** — use `{{.Year}}`, `{{.Month}}`, `{{.Name}}`, `{{.Ext}}`, `{{.Path}}` in dest paths and action fields
 - **Trash management** — deleted files go to trash, not oblivion
 - **Action chaining** — run multiple actions per rule in sequence (e.g., notify then move)
+- **Ignore patterns** — `.gitignore`-style exclusions globally and per-directory
+- **Content matching** — match files by text content, regex, or byte signatures
+- **Config hot-reload** — config changes are picked up automatically in watch mode
+- **Rate limiting** — throttle dispatch throughput per scan or watch cycle
+- **Structured logging** — JSON or text log output via `--log-format`
+- **Live status** — real-time watcher status with `sortie status --watch`
+- **Contextual help** — `sortie actions` describes available action types and their fields
 - **First-match-wins** — per-directory rules evaluate before global rules
 
 ## Install
@@ -45,6 +52,7 @@ sortie [command] [flags]
 | `status` | Show watcher daemon status |
 | `trash` | List files in trash |
 | `trash purge` | Permanently delete all trashed files |
+| `actions [name]` | List action types, or show details for a specific action |
 | `validate [directory...]` | Check rules for errors and potential problems |
 | `man` | Display manual page |
 
@@ -54,6 +62,7 @@ sortie [command] [flags]
 |------|---------|-------------|
 | `--config` | `~/.config/sortie/config.yaml` | Config file path |
 | `-v, --verbose` | `false` | Verbose output |
+| `--log-format` | `text` | Log output format (`text` or `json`) |
 | `--version` | — | Show version |
 
 ### Scan Flags
@@ -61,6 +70,7 @@ sortie [command] [flags]
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--dry-run` | `false` | Preview actions without executing |
+| `--rate-limit` | `0` | Max files to dispatch per second (0 = unlimited) |
 
 ### Watch Flags
 
@@ -68,6 +78,7 @@ sortie [command] [flags]
 |------|---------|-------------|
 | `--dry-run` | `false` | Log actions without executing |
 | `--debounce` | `500ms` | Debounce duration for file events |
+| `--rate-limit` | `0` | Max files to dispatch per second (0 = unlimited) |
 
 ### History Flags
 
@@ -86,6 +97,12 @@ sortie [command] [flags]
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--global` | `false` | Include global rules when listing specific directories |
+
+### Status Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--watch` | `false` | Continuously refresh status display |
 
 ### Validate Flags
 
@@ -127,6 +144,14 @@ sortie trash purge
 ### Central Config (`~/.config/sortie/config.yaml`)
 
 ```yaml
+log_format: json  # "text" (default) or "json" for structured logging
+
+ignore:
+  - .DS_Store
+  - .git
+  - "*.tmp"
+  - node_modules/
+
 directories:
   - path: ~/Downloads
     recursive: false
@@ -135,6 +160,8 @@ directories:
 
 rules:
   - name: images-to-photos
+    priority: 10            # lower = higher priority (default 0)
+    cooldown: 5s            # skip file if same rule matched it within this window
     match:
       extensions: [.jpg, .jpeg, .png, .heic, .gif, .webp]
     action:
@@ -302,6 +329,10 @@ rules:
 ### Per-Directory Config (`~/Downloads/.sortie.yaml`)
 
 ```yaml
+ignore:
+  - "*.crdownload"
+  - "*.part"
+
 rules:
   - name: pdfs-to-documents
     match:
@@ -311,7 +342,33 @@ rules:
       dest: ~/Documents/PDFs/{{.Year}}-{{.Month}}
 ```
 
-Per-directory rules take precedence over global rules. All match conditions use AND logic. First matching rule wins.
+Per-directory rules take precedence over global rules. Per-directory ignore patterns are merged with global ignore patterns. All match conditions use AND logic. First matching rule wins (unless `continue: true` is set).
+
+### Rule Fall-Through (`continue`)
+
+By default, sortie stops at the first matching rule. Set `continue: true` to let a rule fire and still allow subsequent rules to match the same file:
+
+```yaml
+rules:
+  - name: notify-all-downloads
+    continue: true                    # keep evaluating after this rule
+    match:
+      extensions: [.zip, .pdf, .dmg]
+    action:
+      type: notify
+      title: "New download"
+      message: "{{.Name}}{{.Ext}} arrived"
+
+  - name: extract-archives
+    match:
+      extensions: [.zip, .tar.gz, .tgz]
+    actions:
+      - type: extract
+        dest: ~/Downloads/{{.Name}}
+      - type: delete
+```
+
+Without `continue: true`, the notify rule would consume the match and the extract rule would never fire. With it, a `.zip` file triggers both: notify first, then extract + delete.
 
 ### Action Chaining
 
@@ -343,6 +400,21 @@ rules:
 
 If any action in the chain fails, the chain stops. Each action in a chain is recorded separately in history with a shared chain ID, so `sortie undo` reverses all actions in a chain together. The singular `action:` form continues to work for single-action rules.
 
+### Ignore Patterns
+
+Ignore patterns use `.gitignore`-style syntax to exclude files from processing. Patterns can be defined globally in `config.yaml` and per-directory in `.sortie.yaml`. Per-directory patterns are merged with global patterns.
+
+```yaml
+ignore:
+  - .DS_Store          # exact filename
+  - "*.tmp"            # glob pattern
+  - "*.crdownload"     # partial downloads
+  - node_modules/      # trailing slash = directory only
+  - ".*"               # dotfiles
+```
+
+A leading `!` negates a pattern (re-includes a previously ignored file). A leading `/` anchors the pattern to the directory root. These follow the same rules as `.gitignore`.
+
 ### Match Conditions
 
 | Field | Description | Example |
@@ -353,6 +425,9 @@ If any action in the chain fails, the chain stops. Each action in a chain is rec
 | `min_size` / `max_size` | Size threshold | `500MB`, `1GB` |
 | `min_age` / `max_age` | Age threshold | `30d`, `2h` |
 | `mime_type` | MIME type prefix | `image/`, `application/pdf` |
+| `content` | Substring in file content | `TODO` |
+| `content_regex` | Regex against file content | `(?i)confidential` |
+| `content_bytes` | Hex byte signature (magic bytes) | `25504446` (PDF) |
 
 ### Action Types
 
@@ -413,7 +488,7 @@ Some action types shell out to external tools. Install only the tools you need:
 | `open` | `open` | Built-in (macOS) | — |
 | `unquarantine` | `xattr` | Built-in (macOS) | — |
 
-The `extract` action handles `.zip`, `.tar`, `.tar.gz`/`.tgz`, and `.tar.bz2` natively (Go stdlib). Only `.tar.xz` requires the external `tar` command. For other archive formats (`.rar`, `.7z`, etc.), use `exec`:
+The `extract` action handles `.zip`, `.tar`, `.tar.gz`/`.tgz`, and `.tar.bz2` natively (Go stdlib). Only `.tar.xz` requires the external `tar` command. macOS metadata (`__MACOSX`, `._*` resource forks, `.DS_Store`) is automatically stripped during extraction. For other archive formats (`.rar`, `.7z`, etc.), use `exec`:
 
 ```yaml
   - name: extract-rar
@@ -458,6 +533,8 @@ This creates a plist at `~/Library/LaunchAgents/com.msjurset.sortie.plist` that 
 
 The watch command monitors its own binary for changes — after running `make deploy`, the daemon detects the new binary, exits gracefully, and launchd's `KeepAlive` automatically relaunches with the updated version. No manual restart needed for binary updates.
 
+Config changes are picked up automatically in watch mode — sortie detects modifications to `config.yaml` and per-directory `.sortie.yaml` files and reloads rules without restarting.
+
 ### Managing the service
 
 ```bash
@@ -474,10 +551,6 @@ make deploy
 launchctl unload ~/Library/LaunchAgents/com.msjurset.sortie.plist
 
 # Manual start
-launchctl load ~/Library/LaunchAgents/com.msjurset.sortie.plist
-
-# Restart after config changes (binary didn't change, so manual reload needed)
-launchctl unload ~/Library/LaunchAgents/com.msjurset.sortie.plist
 launchctl load ~/Library/LaunchAgents/com.msjurset.sortie.plist
 
 # Uninstall the service

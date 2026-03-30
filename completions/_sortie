@@ -11,6 +11,7 @@ _sortie() {
         'config:Show configuration'
         'status:Show watcher status'
         'trash:Manage the trash directory'
+        'actions:List available action types'
         'validate:Validate rules for errors and potential problems'
         'man:Display the manual page'
         'help:Help about any command'
@@ -21,6 +22,7 @@ _sortie() {
         '(- *)--help[Show help]' \
         '(- *)--version[Show version]' \
         '--config=[Config file path]:path:_files' \
+        '--log-format=[Log output format]:format:(text json)' \
         {-v,--verbose}'[Verbose output]' \
         '1: :->cmd' \
         '*:: :->args'
@@ -35,13 +37,15 @@ _sortie() {
             _arguments \
                 '(- *)--help[Show help]' \
                 '--dry-run[Preview actions without executing]' \
+                '--rate-limit=[Max actions per second]:rate:' \
                 '*:directory:_directories'
             ;;
         watch)
             _arguments \
                 '(- *)--help[Show help]' \
                 '--dry-run[Log actions without executing]' \
-                '--debounce=[Debounce duration]:duration:'
+                '--debounce=[Debounce duration]:duration:' \
+                '--rate-limit=[Max actions per second]:rate:'
             ;;
         history)
             _arguments \
@@ -126,8 +130,63 @@ _sortie() {
                 '--global[Include global rules]' \
                 '*:directory:_directories'
             ;;
-        status|man)
+        status)
+            _arguments \
+                '(- *)--help[Show help]' \
+                '--watch[Continuously refresh status]'
+            ;;
+        man)
             _arguments '(- *)--help[Show help]'
+            ;;
+        actions)
+            local -a action_types
+            action_types=(
+                move copy rename delete compress extract symlink chmod
+                checksum exec notify convert resize watermark ocr
+                encrypt decrypt upload tag open deduplicate unquarantine
+            )
+            _arguments \
+                '(- *)--help[Show help]' \
+                '1:action type:(${action_types[@]})'
+            ;;
+        help)
+            local -a help_topics
+            help_topics=(
+                'scan:Scan directories and apply rules'
+                'watch:Watch directories and dispatch files in real time'
+                'history:Show action history'
+                'undo:Reverse recent dispatch actions'
+                'rules:List configured rules'
+                'config:Show configuration'
+                'status:Show watcher status'
+                'trash:Manage the trash directory'
+                'actions:List available action types'
+                'validate:Validate rules'
+                'man:Display manual page'
+                'move:Action \- move file'
+                'copy:Action \- copy file'
+                'rename:Action \- rename file'
+                'delete:Action \- delete file'
+                'compress:Action \- gzip file'
+                'extract:Action \- extract archive'
+                'symlink:Action \- create symlink'
+                'chmod:Action \- change permissions'
+                'checksum:Action \- hash file'
+                'exec:Action \- run shell command'
+                'notify:Action \- send notification'
+                'convert:Action \- convert with external tool'
+                'resize:Action \- resize image'
+                'watermark:Action \- stamp image'
+                'ocr:Action \- extract text'
+                'encrypt:Action \- encrypt file'
+                'decrypt:Action \- decrypt file'
+                'upload:Action \- upload to cloud'
+                'tag:Action \- apply Finder tags'
+                'open:Action \- open with app'
+                'deduplicate:Action \- deduplicate file'
+                'unquarantine:Action \- remove quarantine'
+            )
+            _describe 'help topic' help_topics
             ;;
         completion)
             _arguments \

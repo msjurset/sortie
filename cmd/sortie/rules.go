@@ -146,23 +146,46 @@ func runRulesTest(cmd *cobra.Command, args []string) error {
 }
 
 func printRules(rules []rule.Rule) {
+	hasPriority := false
+	for _, r := range rules {
+		if r.Priority != 0 {
+			hasPriority = true
+			break
+		}
+	}
+
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "  NAME\tACTION\tMATCH\tDEST")
+	if hasPriority {
+		fmt.Fprintln(w, "  NAME\tPRI\tACTION\tMATCH\tDEST")
+	} else {
+		fmt.Fprintln(w, "  NAME\tACTION\tMATCH\tDEST")
+	}
+
 	for _, r := range rules {
 		match := summarizeMatch(r.Match)
 		actions := r.ResolvedActions()
+
+		var actionStr, destStr string
 		if len(actions) <= 1 {
 			a := r.Action
 			if len(actions) == 1 {
 				a = actions[0]
 			}
-			fmt.Fprintf(w, "  %s\t%s\t%s\t%s\n", r.Name, a.Type, match, a.Dest)
+			actionStr = string(a.Type)
+			destStr = a.Dest
 		} else {
 			types := make([]string, len(actions))
 			for i, a := range actions {
 				types[i] = string(a.Type)
 			}
-			fmt.Fprintf(w, "  %s\t%s\t%s\t(chain)\n", r.Name, strings.Join(types, " → "), match)
+			actionStr = strings.Join(types, " → ")
+			destStr = "(chain)"
+		}
+
+		if hasPriority {
+			fmt.Fprintf(w, "  %s\t%d\t%s\t%s\t%s\n", r.Name, r.Priority, actionStr, match, destStr)
+		} else {
+			fmt.Fprintf(w, "  %s\t%s\t%s\t%s\n", r.Name, actionStr, match, destStr)
 		}
 	}
 	w.Flush()
@@ -193,6 +216,12 @@ func summarizeMatch(m rule.Match) string {
 	}
 	if m.MimeType != "" {
 		parts = append(parts, fmt.Sprintf("mime:%s", m.MimeType))
+	}
+	if m.Content != "" {
+		parts = append(parts, fmt.Sprintf("content:%q", m.Content))
+	}
+	if m.ContentRegex != "" {
+		parts = append(parts, fmt.Sprintf("content_re:%s", m.ContentRegex))
 	}
 	if len(parts) == 0 {
 		return "*"

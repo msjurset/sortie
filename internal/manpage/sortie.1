@@ -27,8 +27,10 @@ rules. Use \fB\-\-dry\-run\fR to preview without executing.
 .B watch
 Watch all configured directories for new files in real time. Runs as a
 foreground daemon with configurable debounce. Monitors its own binary and
-exits gracefully when a new version is deployed. Exits cleanly on
-SIGINT/SIGTERM.
+exits gracefully when a new version is deployed. Automatically reloads
+configuration files when they change, so edits to
+\fI~/.config/sortie/config.yaml\fR or any \fI.sortie.yaml\fR take effect
+without restarting. Exits cleanly on SIGINT/SIGTERM.
 .TP
 .B history
 Show recent dispatch actions. Use \fB\-n\fR or \fB\-\-limit\fR to control output.
@@ -57,6 +59,7 @@ Print the config file path.
 .TP
 .B status
 Check if the watcher daemon is running, show watched directories and rule counts.
+Use \fB\-\-watch\fR to continuously refresh the display.
 .TP
 .B trash
 List files in the trash directory.
@@ -86,6 +89,11 @@ Incompatible chain combinations (delete/compress/deduplicate not last, consecuti
 Infinite loop risk when a destination falls inside a watched directory
 .RE
 .TP
+.B actions \fR[\fIname\fR]
+List all available action types. With a name argument, show detailed
+documentation for that specific action type including required and optional
+fields.
+.TP
 .B man
 Display this manual page.
 .SH OPTIONS
@@ -96,6 +104,10 @@ Config file path. Default: \fI~/.config/sortie/config.yaml\fR.
 .BR \-v ", " \-\-verbose
 Enable verbose output.
 .TP
+.BR \-\-log\-format " " \fIformat\fR
+Log output format. Values: \fBtext\fR (default), \fBjson\fR. JSON format emits
+one JSON object per log line, suitable for structured log aggregation.
+.TP
 .BR \-\-version
 Show version information.
 .TP
@@ -105,6 +117,9 @@ Show help.
 .TP
 .BR \-\-dry\-run
 Preview actions without executing.
+.TP
+.BR \-\-rate\-limit " " \fIN\fR
+Maximum number of actions per second. Default: unlimited.
 .SS "watch flags"
 .TP
 .BR \-\-dry\-run
@@ -112,10 +127,17 @@ Log what would happen without executing.
 .TP
 .BR \-\-debounce " " \fIduration\fR
 Debounce period for file events. Default: 500ms.
+.TP
+.BR \-\-rate\-limit " " \fIN\fR
+Maximum number of actions per second. Default: unlimited.
 .SS "history flags"
 .TP
 .BR \-n ", " \-\-limit " " \fIN\fR
 Maximum number of records to show. Default: 20.
+.SS "status flags"
+.TP
+.BR \-\-watch
+Continuously refresh the status display, updating in real time.
 .SS "undo flags"
 .TP
 .BR \-\-last " " \fIN\fR
@@ -126,18 +148,41 @@ Located at \fI~/.config/sortie/config.yaml\fR. Run \fBsortie config init\fR to
 generate a starter file.
 .PP
 .nf
+log_format: text    # text or json
+
 directories:
   \- path: ~/Downloads
     recursive: false
 
+ignore:
+  \- "*.DS_Store"
+  \- ".Trash"
+  \- "!important.tmp"   # negation: do not ignore this file
+
 rules:
   \- name: images\-to\-photos
+    priority: 10
     match:
       extensions: [.jpg, .jpeg, .png, .heic]
     action:
       type: move
       dest: ~/Pictures/Sorted/{{.Year}}/{{.Month}}
 .fi
+.PP
+.B log_format
+sets the log output format globally (\fBtext\fR or \fBjson\fR). Can be
+overridden by the \fB\-\-log\-format\fR flag.
+.PP
+.B priority
+is an integer on each rule (default: 0). Higher\-priority rules are evaluated
+first. When two rules share the same priority, declaration order is the
+tiebreaker.
+.PP
+The \fBignore:\fR section lists patterns for files that sortie should skip
+entirely. Patterns follow .gitignore\-style semantics: \fB*\fR matches any
+sequence of non\-separator characters, \fB**\fR matches across directories,
+and a \fB!\fR prefix negates a pattern (un\-ignoring a previously ignored
+file).
 .SS "Action Chaining"
 Rules can specify multiple actions using \fBactions:\fR (plural) instead of
 \fBaction:\fR (singular). Actions execute in order. If a move or rename changes
@@ -161,9 +206,14 @@ history with a shared chain ID. Undo reverses all actions in a chain together.
 The singular \fBaction:\fR form continues to work.
 .SS "Per\-Directory Config"
 Place a \fI.sortie.yaml\fR file in any watched directory. These rules are
-evaluated before global rules for that directory.
+evaluated before global rules for that directory. Per\-directory configs may
+also include an \fBignore:\fR section that applies only to that directory,
+using the same .gitignore\-style semantics as the central config.
 .PP
 .nf
+ignore:
+  \- "*.part"
+
 rules:
   \- name: pdfs\-to\-documents
     match:
@@ -192,6 +242,16 @@ File age thresholds (e.g., "30d", "2h").
 .TP
 .B mime_type
 MIME type prefix match (e.g., "image/", "application/pdf").
+.TP
+.B content
+Substring match against the file's text content.
+.TP
+.B content_regex
+Regular expression matched against the file's text content.
+.TP
+.B content_bytes
+Hex\-encoded byte sequence matched against the file's raw bytes. Useful for
+matching magic numbers or binary signatures (e.g., "504b0304" for ZIP files).
 .SS "Action Types"
 .TP
 .B move
@@ -212,6 +272,8 @@ Gzip the file and remove the original.
 .B extract
 Extract an archive (.zip, .tar, .tar.gz, .tar.bz2, .tar.xz) into the destination
 directory. Supports zip via Go stdlib and tar variants via stdlib or \fBtar\fR(1).
+macOS metadata (\fB__MACOSX\fR, \fB._*\fR resource forks, \fB.DS_Store\fR) is
+automatically stripped during extraction.
 .TP
 .B symlink
 Create a symbolic link at the destination pointing to the original file. The
@@ -366,6 +428,43 @@ the system default application is used.
 .B on_duplicate
 Behavior when deduplicate finds a duplicate: "skip" (default) leaves the source
 in place, "delete" removes the source file.
+.SS "Per\-Rule Rate Limiting"
+.TP
+.B cooldown
+Minimum duration between consecutive firings of the same rule (e.g., "5s",
+"1m", "500ms"). If a rule matches again before its cooldown expires, the
+match is skipped. Applied per\-rule, independent of the global
+\fB\-\-rate\-limit\fR flag. Default: no cooldown.
+.SS "Rule Fall\-Through (continue)"
+By default, sortie uses first\-match\-wins: when a file matches a rule, no
+further rules are evaluated. Setting \fBcontinue: true\fR on a rule causes
+evaluation to continue to subsequent rules after the match.
+.PP
+This is useful for rules that perform side effects (like notifications or
+tagging) without stopping later rules from also matching:
+.PP
+.nf
+rules:
+  \- name: notify\-all\-downloads
+    continue: true              # keep evaluating after this rule
+    match:
+      extensions: [.zip, .pdf, .dmg]
+    action:
+      type: notify
+      title: "New download"
+      message: "{{.Name}}{{.Ext}} arrived"
+
+  \- name: extract\-archives
+    match:
+      extensions: [.zip, .tar.gz, .tgz]
+    actions:
+      \- type: extract
+        dest: ~/Downloads/{{.Name}}
+      \- type: delete
+.fi
+.PP
+Without \fBcontinue: true\fR, the notify rule would consume the match and the
+extract rule would never fire.
 .SS "External Tool Requirements"
 Some actions require external tools to be installed:
 .TP
@@ -773,9 +872,7 @@ $ launchctl unload ~/Library/LaunchAgents/com.msjurset.sortie.plist
 # Manual start
 $ launchctl load ~/Library/LaunchAgents/com.msjurset.sortie.plist
 
-# Restart after config changes (binary unchanged, manual reload needed)
-$ launchctl unload ~/Library/LaunchAgents/com.msjurset.sortie.plist
-$ launchctl load ~/Library/LaunchAgents/com.msjurset.sortie.plist
+# Config changes are auto\-reloaded in watch mode; no restart needed
 
 # Uninstall
 $ make uninstall\-launchd

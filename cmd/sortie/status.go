@@ -1,15 +1,26 @@
 package main
 
 import (
+	"bufio"
+	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
+	"github.com/msjurset/sortie/internal/history"
 	"github.com/spf13/cobra"
 )
+
+var statusFlags struct {
+	watch bool
+}
 
 var statusCmd = &cobra.Command{
 	Use:   "status",
@@ -19,6 +30,7 @@ var statusCmd = &cobra.Command{
 }
 
 func init() {
+	statusCmd.Flags().BoolVar(&statusFlags.watch, "watch", false, "live tail of dispatch activity")
 	rootCmd.AddCommand(statusCmd)
 }
 
@@ -63,5 +75,91 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	ruleCount := len(cfg.Rules)
 	fmt.Printf("\nGlobal rules: %d\n", ruleCount)
 
+	if statusFlags.watch {
+		fmt.Println("\nWatching for activity...")
+		return tailHistory(cfg.HistoryFile)
+	}
+
 	return nil
+}
+
+// tailHistory seeks to the end of the history file and polls for new records,
+// printing each one as a formatted line.
+func tailHistory(path string) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// File doesn't exist yet — wait for it
+			f, err = waitForFile(ctx, path)
+			if err != nil {
+				return err
+			}
+		} else {
+			return fmt.Errorf("opening history: %w", err)
+		}
+	}
+	defer f.Close()
+
+	// Seek to end
+	if _, err := f.Seek(0, io.SeekEnd); err != nil {
+		return fmt.Errorf("seeking to end: %w", err)
+	}
+
+	scanner := bufio.NewScanner(f)
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			for scanner.Scan() {
+				var rec history.Record
+				if err := json.Unmarshal(scanner.Bytes(), &rec); err != nil {
+					continue
+				}
+				if rec.Undone {
+					continue
+				}
+				printRecord(rec)
+			}
+		}
+	}
+}
+
+func printRecord(rec history.Record) {
+	ts := rec.Timestamp.Local().Format("15:04:05")
+	src := filepath.Base(rec.Src)
+
+	if rec.Error != "" {
+		fmt.Printf("[%s] ERROR %s %s: %s (%s)\n", ts, rec.Action, src, rec.Error, rec.RuleName)
+		return
+	}
+
+	if rec.Dest != "" {
+		fmt.Printf("[%s] %s %s -> %s (%s)\n", ts, rec.Action, src, rec.Dest, rec.RuleName)
+	} else {
+		fmt.Printf("[%s] %s %s (%s)\n", ts, rec.Action, src, rec.RuleName)
+	}
+}
+
+func waitForFile(ctx context.Context, path string) (*os.File, error) {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-ticker.C:
+			f, err := os.Open(path)
+			if err == nil {
+				return f, nil
+			}
+		}
+	}
 }

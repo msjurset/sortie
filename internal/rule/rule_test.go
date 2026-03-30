@@ -202,6 +202,85 @@ func TestRuleMatches(t *testing.T) {
 	}
 }
 
+func TestContentMatch(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+
+	// Create a file with known content
+	contentFile := filepath.Join(dir, "invoice.pdf")
+	if err := os.WriteFile(contentFile, []byte("This is an Invoice #12345 for payment"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(contentFile, now, now); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := NewFileInfo(contentFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("case-insensitive substring match", func(t *testing.T) {
+		r := Rule{Name: "test", Match: Match{Content: "invoice"}}
+		if !r.Matches(fi) {
+			t.Error("'invoice' should match 'Invoice' case-insensitively")
+		}
+	})
+
+	t.Run("substring no match", func(t *testing.T) {
+		r := Rule{Name: "test", Match: Match{Content: "receipt"}}
+		if r.Matches(fi) {
+			t.Error("'receipt' should not match")
+		}
+	})
+
+	t.Run("regex match", func(t *testing.T) {
+		r := Rule{Name: "test", Match: Match{ContentRegex: `#\d{5}`}}
+		if !r.Matches(fi) {
+			t.Error("regex #\\d{5} should match '#12345'")
+		}
+	})
+
+	t.Run("regex no match", func(t *testing.T) {
+		r := Rule{Name: "test", Match: Match{ContentRegex: `#\d{6}`}}
+		if r.Matches(fi) {
+			t.Error("regex #\\d{6} should not match '#12345'")
+		}
+	})
+
+	t.Run("content AND extension", func(t *testing.T) {
+		r := Rule{Name: "test", Match: Match{Extensions: []string{".pdf"}, Content: "invoice"}}
+		if !r.Matches(fi) {
+			t.Error("should match both extension and content")
+		}
+
+		r2 := Rule{Name: "test", Match: Match{Extensions: []string{".txt"}, Content: "invoice"}}
+		if r2.Matches(fi) {
+			t.Error("wrong extension should cause no match despite content match")
+		}
+	})
+
+	t.Run("content_bytes limit", func(t *testing.T) {
+		// Content is at beginning, limit should still find it
+		r := Rule{Name: "test", Match: Match{Content: "invoice", ContentBytes: 10}}
+		// "This is an" = 10 bytes, doesn't contain "invoice"
+		if r.Matches(fi) {
+			t.Error("content_bytes=10 should not reach 'invoice' at position 15+")
+		}
+	})
+
+	t.Run("empty file", func(t *testing.T) {
+		emptyPath := filepath.Join(dir, "empty.txt")
+		os.WriteFile(emptyPath, nil, 0o644)
+		os.Chtimes(emptyPath, now, now)
+		emptyFi, _ := NewFileInfo(emptyPath)
+
+		r := Rule{Name: "test", Match: Match{Content: "anything"}}
+		if r.Matches(emptyFi) {
+			t.Error("empty file should not match content search")
+		}
+	})
+}
+
 func TestFirstMatch(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now()
@@ -235,6 +314,197 @@ func TestFirstMatch(t *testing.T) {
 			os.Remove(fi.Path)
 		})
 	}
+}
+
+func TestFirstMatchPriority(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+
+	t.Run("higher priority wins over declaration order", func(t *testing.T) {
+		rules := []Rule{
+			{Name: "catch-all", Priority: 0, Match: Match{Glob: "*"}, Action: Action{Type: "move"}},
+			{Name: "pdfs", Priority: 10, Match: Match{Extensions: []string{".pdf"}}, Action: Action{Type: "move"}},
+		}
+		fi := testFile(t, dir, "doc.pdf", 100, now)
+		defer os.Remove(fi.Path)
+
+		matched := FirstMatch(rules, fi)
+		if matched == nil || matched.Name != "pdfs" {
+			t.Errorf("expected pdfs (priority 10), got %v", matched)
+		}
+	})
+
+	t.Run("equal priority preserves declaration order", func(t *testing.T) {
+		rules := []Rule{
+			{Name: "first", Priority: 5, Match: Match{Glob: "*"}, Action: Action{Type: "move"}},
+			{Name: "second", Priority: 5, Match: Match{Glob: "*"}, Action: Action{Type: "copy"}},
+		}
+		fi := testFile(t, dir, "test.txt", 100, now)
+		defer os.Remove(fi.Path)
+
+		matched := FirstMatch(rules, fi)
+		if matched == nil || matched.Name != "first" {
+			t.Errorf("expected first (same priority, declared first), got %v", matched)
+		}
+	})
+
+	t.Run("zero priority preserves original order", func(t *testing.T) {
+		rules := []Rule{
+			{Name: "images", Match: Match{Extensions: []string{".jpg"}}},
+			{Name: "catch-all", Match: Match{Glob: "*"}},
+		}
+		fi := testFile(t, dir, "photo.jpg", 100, now)
+		defer os.Remove(fi.Path)
+
+		matched := FirstMatch(rules, fi)
+		if matched == nil || matched.Name != "images" {
+			t.Errorf("expected images (declared first, both priority 0), got %v", matched)
+		}
+	})
+
+	t.Run("per-dir rules win at same priority via slice position", func(t *testing.T) {
+		// Per-dir rules come first in the merged slice
+		rules := []Rule{
+			{Name: "per-dir-rule", Priority: 0, Match: Match{Glob: "*"}, Action: Action{Type: "move"}},
+			{Name: "global-rule", Priority: 0, Match: Match{Glob: "*"}, Action: Action{Type: "copy"}},
+		}
+		fi := testFile(t, dir, "file.txt", 100, now)
+		defer os.Remove(fi.Path)
+
+		matched := FirstMatch(rules, fi)
+		if matched == nil || matched.Name != "per-dir-rule" {
+			t.Errorf("expected per-dir-rule (first in slice at same priority), got %v", matched)
+		}
+	})
+
+	t.Run("negative priority sorts after zero", func(t *testing.T) {
+		rules := []Rule{
+			{Name: "fallback", Priority: -1, Match: Match{Glob: "*"}},
+			{Name: "normal", Priority: 0, Match: Match{Glob: "*"}},
+		}
+		fi := testFile(t, dir, "test.txt", 100, now)
+		defer os.Remove(fi.Path)
+
+		matched := FirstMatch(rules, fi)
+		if matched == nil || matched.Name != "normal" {
+			t.Errorf("expected normal (priority 0 > -1), got %v", matched)
+		}
+	})
+}
+
+func TestFindMatchesContinue(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+
+	t.Run("default stops at first match", func(t *testing.T) {
+		rules := []Rule{
+			{Name: "first", Match: Match{Glob: "*"}, Action: Action{Type: "notify"}},
+			{Name: "second", Match: Match{Glob: "*"}, Action: Action{Type: "move", Dest: "/dest"}},
+		}
+		fi := testFile(t, dir, "test.txt", 100, now)
+		defer os.Remove(fi.Path)
+
+		matches := FindMatches(rules, fi)
+		if len(matches) != 1 {
+			t.Fatalf("expected 1 match, got %d", len(matches))
+		}
+		if matches[0].Name != "first" {
+			t.Errorf("expected first, got %s", matches[0].Name)
+		}
+	})
+
+	t.Run("continue allows fall-through", func(t *testing.T) {
+		rules := []Rule{
+			{Name: "notify", Continue: true, Match: Match{Glob: "*"}, Action: Action{Type: "notify"}},
+			{Name: "move", Match: Match{Glob: "*"}, Action: Action{Type: "move", Dest: "/dest"}},
+		}
+		fi := testFile(t, dir, "test2.txt", 100, now)
+		defer os.Remove(fi.Path)
+
+		matches := FindMatches(rules, fi)
+		if len(matches) != 2 {
+			t.Fatalf("expected 2 matches, got %d", len(matches))
+		}
+		if matches[0].Name != "notify" {
+			t.Errorf("first match should be notify, got %s", matches[0].Name)
+		}
+		if matches[1].Name != "move" {
+			t.Errorf("second match should be move, got %s", matches[1].Name)
+		}
+	})
+
+	t.Run("continue stops at non-continue rule", func(t *testing.T) {
+		rules := []Rule{
+			{Name: "first", Continue: true, Match: Match{Glob: "*"}, Action: Action{Type: "notify"}},
+			{Name: "second", Match: Match{Glob: "*"}, Action: Action{Type: "tag"}},
+			{Name: "third", Match: Match{Glob: "*"}, Action: Action{Type: "move", Dest: "/dest"}},
+		}
+		fi := testFile(t, dir, "test3.txt", 100, now)
+		defer os.Remove(fi.Path)
+
+		matches := FindMatches(rules, fi)
+		if len(matches) != 2 {
+			t.Fatalf("expected 2 matches (stop at second which has no continue), got %d", len(matches))
+		}
+		if matches[1].Name != "second" {
+			t.Errorf("second match should be second, got %s", matches[1].Name)
+		}
+	})
+
+	t.Run("continue skips non-matching rules", func(t *testing.T) {
+		rules := []Rule{
+			{Name: "notify-all", Continue: true, Match: Match{Glob: "*"}, Action: Action{Type: "notify"}},
+			{Name: "pdfs-only", Match: Match{Extensions: []string{".pdf"}}, Action: Action{Type: "move", Dest: "/dest"}},
+			{Name: "catch-all", Match: Match{Glob: "*"}, Action: Action{Type: "delete"}},
+		}
+		fi := testFile(t, dir, "test4.txt", 100, now)
+		defer os.Remove(fi.Path)
+
+		matches := FindMatches(rules, fi)
+		if len(matches) != 2 {
+			t.Fatalf("expected 2 matches (notify + catch-all, skip pdfs), got %d", len(matches))
+		}
+		if matches[0].Name != "notify-all" {
+			t.Errorf("first should be notify-all, got %s", matches[0].Name)
+		}
+		if matches[1].Name != "catch-all" {
+			t.Errorf("second should be catch-all, got %s", matches[1].Name)
+		}
+	})
+
+	t.Run("continue with priority", func(t *testing.T) {
+		rules := []Rule{
+			{Name: "low-pri", Priority: 0, Match: Match{Glob: "*"}, Action: Action{Type: "delete"}},
+			{Name: "high-pri", Priority: 10, Continue: true, Match: Match{Glob: "*"}, Action: Action{Type: "notify"}},
+		}
+		fi := testFile(t, dir, "test5.txt", 100, now)
+		defer os.Remove(fi.Path)
+
+		matches := FindMatches(rules, fi)
+		if len(matches) != 2 {
+			t.Fatalf("expected 2 matches, got %d", len(matches))
+		}
+		// high-pri fires first (sorted by priority), then falls through to low-pri
+		if matches[0].Name != "high-pri" {
+			t.Errorf("first should be high-pri, got %s", matches[0].Name)
+		}
+		if matches[1].Name != "low-pri" {
+			t.Errorf("second should be low-pri, got %s", matches[1].Name)
+		}
+	})
+
+	t.Run("no matches returns empty", func(t *testing.T) {
+		rules := []Rule{
+			{Name: "pdfs", Match: Match{Extensions: []string{".pdf"}}},
+		}
+		fi := testFile(t, dir, "test6.txt", 100, now)
+		defer os.Remove(fi.Path)
+
+		matches := FindMatches(rules, fi)
+		if len(matches) != 0 {
+			t.Errorf("expected 0 matches, got %d", len(matches))
+		}
+	})
 }
 
 func TestParseSize(t *testing.T) {

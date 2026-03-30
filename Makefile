@@ -35,18 +35,26 @@ release: clean generate test
 		cd dist && zip sortie-$(VERSION)-windows-amd64.zip sortie.exe sortie.1 && rm sortie.exe
 	rm dist/sortie.1
 
-deploy: build install-man install-completion
+deploy: build install-man install-completions
 	cp sortie ~/.local/bin/
 
 install-man:
 	install -d /usr/local/share/man/man1
 	install -m 644 sortie.1 /usr/local/share/man/man1/sortie.1
 
-install-completion:
+install-completions:
 	install -d ~/.oh-my-zsh/custom/completions
 	install -m 644 completions/_sortie ~/.oh-my-zsh/custom/completions/_sortie
+	@echo "Installed zsh completions"
 	@echo "Refreshing zsh completions..."
 	@zsh -c 'autoload -U compinit && rm -f ~/.zcompdump* && compinit' 2>/dev/null || true
+	@if [ -d /usr/local/share/bash-completion/completions ] || [ -d /opt/homebrew/share/bash-completion/completions ]; then \
+		dest=$$([ -d /opt/homebrew/share/bash-completion/completions ] && echo /opt/homebrew/share/bash-completion/completions || echo /usr/local/share/bash-completion/completions); \
+		install -m 644 completions/sortie.bash "$$dest/sortie"; \
+		echo "Installed bash completions to $$dest/sortie"; \
+	else \
+		echo "Bash completions directory not found, skipping"; \
+	fi
 
 PLIST_DEST := $(HOME)/Library/LaunchAgents/com.msjurset.sortie.plist
 BINARY_PATH := $(HOME)/.local/bin/sortie
@@ -74,4 +82,4 @@ uninstall-launchd:
 		echo "No service installed."; \
 	fi
 
-.PHONY: generate build run test vet clean release deploy install-man install-completion install-launchd uninstall-launchd
+.PHONY: generate build run test vet clean release deploy install-man install-completions install-launchd uninstall-launchd

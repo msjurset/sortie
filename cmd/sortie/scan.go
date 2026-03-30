@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/msjurset/sortie/internal/dispatcher"
 	"github.com/msjurset/sortie/internal/history"
@@ -12,7 +14,8 @@ import (
 )
 
 var scanFlags struct {
-	dryRun bool
+	dryRun    bool
+	rateLimit time.Duration
 }
 
 var scanCmd = &cobra.Command{
@@ -24,6 +27,7 @@ var scanCmd = &cobra.Command{
 
 func init() {
 	scanCmd.Flags().BoolVar(&scanFlags.dryRun, "dry-run", false, "preview actions without executing")
+	scanCmd.Flags().DurationVar(&scanFlags.rateLimit, "rate-limit", 0, "minimum interval between dispatches (e.g., 500ms, 1s)")
 	rootCmd.AddCommand(scanCmd)
 }
 
@@ -41,12 +45,13 @@ func runScan(cmd *cobra.Command, args []string) error {
 
 	store := history.NewStore(cfg.HistoryFile)
 	disp := dispatcher.New(store, dispatcher.WithTrashDir(cfg.TrashDir))
+	rl := dispatcher.NewRateLimiter(scanFlags.rateLimit)
 
 	var totalActions int
 
 	for _, dir := range dirs {
 		dir = expandHome(dir)
-		n, err := scanDir(disp, dir)
+		n, err := scanDir(disp, rl, dir)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error scanning %s: %v\n", dir, err)
 			continue
@@ -65,7 +70,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func scanDir(disp *dispatcher.Dispatcher, dir string) (int, error) {
+func scanDir(disp *dispatcher.Dispatcher, rl *dispatcher.RateLimiter, dir string) (int, error) {
 	rules, err := cfg.MergedRules(dir)
 	if err != nil {
 		return 0, fmt.Errorf("loading rules for %s: %w", dir, err)
@@ -77,6 +82,8 @@ func scanDir(disp *dispatcher.Dispatcher, dir string) (int, error) {
 		}
 		return 0, nil
 	}
+
+	globalIgnore, localIgnore := cfg.EffectiveIgnore(dir)
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -101,32 +108,58 @@ func scanDir(disp *dispatcher.Dispatcher, dir string) (int, error) {
 			continue
 		}
 
-		matched := rule.FirstMatch(rules, fi)
-		if matched == nil {
+		if rule.ShouldIgnore(globalIgnore, localIgnore, fi) {
+			if verbose {
+				fmt.Printf("  %s: ignored\n", fi.Info.Name())
+			}
+			continue
+		}
+
+		matches := rule.FindMatches(rules, fi)
+		if len(matches) == 0 {
 			if verbose {
 				fmt.Printf("  %s: no match\n", fi.Info.Name())
 			}
 			continue
 		}
 
-		result, err := disp.Dispatch(fi, *matched, scanFlags.dryRun)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "  error: %v\n", err)
-			continue
-		}
+		for _, matched := range matches {
+			// Check per-rule cooldown
+			if matched.Cooldown != "" {
+				cd, _ := rule.ParseAge(matched.Cooldown)
+				if !rl.AllowRule(matched.Name, cd) {
+					if verbose {
+						fmt.Printf("  %s: cooldown (%s)\n", fi.Info.Name(), matched.Cooldown)
+					}
+					continue
+				}
+			}
 
-		prefix := " "
-		if result.DryRun {
-			prefix = "  [dry-run]"
+			// Wait for global rate limit
+			if err := rl.Wait(context.Background()); err != nil {
+				return count, err
+			}
+
+			result, err := disp.Dispatch(fi, *matched, scanFlags.dryRun)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  error: %v\n", err)
+				continue
+			}
+
+			prefix := " "
+			if result.DryRun {
+				prefix = "  [dry-run]"
+			}
+			fmt.Printf("%s %s %s -> %s (%s)\n",
+				prefix,
+				result.Record.Action,
+				filepath.Base(result.Record.Src),
+				result.Record.Dest,
+				matched.Name,
+			)
+			rl.Record(matched.Name)
+			count++
 		}
-		fmt.Printf("%s %s %s -> %s (%s)\n",
-			prefix,
-			result.Record.Action,
-			filepath.Base(result.Record.Src),
-			result.Record.Dest,
-			matched.Name,
-		)
-		count++
 	}
 
 	return count, nil

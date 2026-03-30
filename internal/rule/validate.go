@@ -3,6 +3,7 @@ package rule
 import (
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -63,6 +64,20 @@ func validateRule(r Rule, watchedDirs []WatchedDir) []Finding {
 			Message:  "no actions defined (need action: or actions:)",
 		})
 		return findings
+	}
+
+	// Validate match conditions
+	findings = append(findings, ValidateMatch(r.Name, r.Match)...)
+
+	// Validate cooldown
+	if r.Cooldown != "" {
+		if _, err := ParseAge(r.Cooldown); err != nil {
+			findings = append(findings, Finding{
+				Severity: SeverityError,
+				Rule:     r.Name,
+				Message:  fmt.Sprintf("invalid cooldown %q: %v", r.Cooldown, err),
+			})
+		}
 	}
 
 	// Validate each action individually
@@ -346,6 +361,57 @@ func isSubpath(child, parent string) bool {
 	}
 
 	return strings.HasPrefix(child, parent+string(filepath.Separator))
+}
+
+// ValidateMatch checks match conditions for potential issues.
+func ValidateMatch(ruleName string, m Match) []Finding {
+	var findings []Finding
+	if m.ContentRegex != "" {
+		if _, err := regexp.Compile(m.ContentRegex); err != nil {
+			findings = append(findings, Finding{
+				Severity: SeverityError,
+				Rule:     ruleName,
+				Message:  fmt.Sprintf("invalid content_regex %q: %v", m.ContentRegex, err),
+			})
+		}
+	}
+	if m.ContentBytes > 10*1024*1024 {
+		findings = append(findings, Finding{
+			Severity: SeverityWarning,
+			Rule:     ruleName,
+			Message:  fmt.Sprintf("content_bytes is %d (>10MB) — may be slow on large directories", m.ContentBytes),
+		})
+	}
+	if (m.Content != "" || m.ContentRegex != "") && len(m.Extensions) == 0 && m.Glob == "" && m.MimeType == "" {
+		findings = append(findings, Finding{
+			Severity: SeverityWarning,
+			Rule:     ruleName,
+			Message:  "content matching without extension, glob, or mime_type filter will read every file",
+		})
+	}
+	return findings
+}
+
+// ValidateIgnorePatterns checks that ignore patterns are valid globs.
+func ValidateIgnorePatterns(patterns []string, source string) []Finding {
+	var findings []Finding
+	for _, p := range patterns {
+		pattern := p
+		if strings.HasPrefix(pattern, "!") {
+			pattern = pattern[1:]
+		}
+		if pattern == "" {
+			continue
+		}
+		if _, err := filepath.Match(pattern, "test"); err != nil {
+			findings = append(findings, Finding{
+				Severity: SeverityError,
+				Rule:     source,
+				Message:  fmt.Sprintf("invalid ignore pattern %q: %v", p, err),
+			})
+		}
+	}
+	return findings
 }
 
 func isValidOctalMode(s string) bool {

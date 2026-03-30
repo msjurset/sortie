@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -16,9 +17,11 @@ import (
 type Rule struct {
 	Name     string   `yaml:"name"`
 	Match    Match    `yaml:"match"`
-	Action   Action   `yaml:"action,omitempty"`  // single action (backwards-compatible)
-	Actions  []Action `yaml:"actions,omitempty"` // action chain (evaluated in order)
+	Action   Action   `yaml:"action,omitempty"`   // single action (backwards-compatible)
+	Actions  []Action `yaml:"actions,omitempty"`   // action chain (evaluated in order)
 	Priority int      `yaml:"priority,omitempty"`
+	Cooldown string   `yaml:"cooldown,omitempty"` // minimum interval between rule triggers e.g. "5s", "1m"
+	Continue bool     `yaml:"continue,omitempty"` // if true, keep evaluating subsequent rules after this one matches
 }
 
 // ResolvedActions returns the list of actions to execute. If Actions is set,
@@ -37,14 +40,17 @@ func (r *Rule) ResolvedActions() []Action {
 // Match defines the conditions for a rule. All specified conditions must be
 // true (AND logic).
 type Match struct {
-	Extensions []string `yaml:"extensions,omitempty"`
-	Glob       string   `yaml:"glob,omitempty"`
-	Regex      string   `yaml:"regex,omitempty"`
-	MinSize    string   `yaml:"min_size,omitempty"`
-	MaxSize    string   `yaml:"max_size,omitempty"`
-	MinAge     string   `yaml:"min_age,omitempty"`
-	MaxAge     string   `yaml:"max_age,omitempty"`
-	MimeType   string   `yaml:"mime_type,omitempty"`
+	Extensions   []string `yaml:"extensions,omitempty"`
+	Glob         string   `yaml:"glob,omitempty"`
+	Regex        string   `yaml:"regex,omitempty"`
+	MinSize      string   `yaml:"min_size,omitempty"`
+	MaxSize      string   `yaml:"max_size,omitempty"`
+	MinAge       string   `yaml:"min_age,omitempty"`
+	MaxAge       string   `yaml:"max_age,omitempty"`
+	MimeType     string   `yaml:"mime_type,omitempty"`
+	Content      string   `yaml:"content,omitempty"`       // case-insensitive substring search on file content
+	ContentRegex string   `yaml:"content_regex,omitempty"` // regex search on file content
+	ContentBytes int      `yaml:"content_bytes,omitempty"` // max bytes to read (default 65536)
 }
 
 // ActionType represents the type of action to perform on a matched file.
@@ -182,6 +188,51 @@ func (r *Rule) Matches(fi FileInfo) bool {
 		}
 	}
 
+	// Content matching — most expensive, runs last after all cheap checks pass
+	if r.Match.Content != "" || r.Match.ContentRegex != "" {
+		if !matchContent(fi.Path, r.Match) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func matchContent(path string, m Match) bool {
+	maxBytes := m.ContentBytes
+	if maxBytes <= 0 {
+		maxBytes = 65536 // 64KB default
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+
+	buf := make([]byte, maxBytes)
+	n, _ := f.Read(buf)
+	if n == 0 {
+		return false
+	}
+	content := string(buf[:n])
+
+	if m.Content != "" {
+		if !strings.Contains(strings.ToLower(content), strings.ToLower(m.Content)) {
+			return false
+		}
+	}
+
+	if m.ContentRegex != "" {
+		re, err := regexp.Compile(m.ContentRegex)
+		if err != nil {
+			return false
+		}
+		if !re.MatchString(content) {
+			return false
+		}
+	}
+
 	return true
 }
 
@@ -211,14 +262,42 @@ func detectMIME(path string) string {
 	return http.DetectContentType(buf[:n])
 }
 
-// FirstMatch returns the first rule that matches the given file.
+// FirstMatch returns the highest-priority rule that matches the given file.
+// Rules are stable-sorted by priority (descending) so that declaration order
+// is preserved as a tiebreaker. Per-directory rules should precede global
+// rules in the input slice to win at equal priority.
+// FirstMatch returns the highest-priority rule that matches the given file.
+// Deprecated: use FindMatches for continue support.
 func FirstMatch(rules []Rule, fi FileInfo) *Rule {
-	for i := range rules {
-		if rules[i].Matches(fi) {
-			return &rules[i]
-		}
+	matches := FindMatches(rules, fi)
+	if len(matches) > 0 {
+		return matches[0]
 	}
 	return nil
+}
+
+// FindMatches returns all rules that match the given file, respecting priority
+// ordering and the continue flag. Rules are stable-sorted by priority
+// (descending). Matching stops at the first rule that does NOT have
+// continue: true. This preserves first-match-wins as the default while
+// allowing explicit fall-through.
+func FindMatches(rules []Rule, fi FileInfo) []*Rule {
+	sorted := make([]Rule, len(rules))
+	copy(sorted, rules)
+	slices.SortStableFunc(sorted, func(a, b Rule) int {
+		return b.Priority - a.Priority // descending
+	})
+
+	var matched []*Rule
+	for i := range sorted {
+		if sorted[i].Matches(fi) {
+			matched = append(matched, &sorted[i])
+			if !sorted[i].Continue {
+				break
+			}
+		}
+	}
+	return matched
 }
 
 // ParseSize parses a human-readable size string like "500MB" or "1GB" into bytes.

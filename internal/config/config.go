@@ -15,6 +15,8 @@ type Config struct {
 	LogDir      string      `yaml:"log_dir"`
 	HistoryFile string      `yaml:"history_file"`
 	TrashDir    string      `yaml:"trash_dir"`
+	LogFormat   string      `yaml:"log_format,omitempty"` // "text" (default) or "json"
+	Ignore      []string    `yaml:"ignore,omitempty"`     // global ignore patterns
 	Directories []Directory `yaml:"directories"`
 	Rules       []rule.Rule `yaml:"rules"`
 }
@@ -27,7 +29,8 @@ type Directory struct {
 
 // DirConfig holds per-directory rules from a .sortie.yaml file.
 type DirConfig struct {
-	Rules []rule.Rule `yaml:"rules"`
+	Ignore []string    `yaml:"ignore,omitempty"` // per-directory ignore patterns
+	Rules  []rule.Rule `yaml:"rules"`
 }
 
 // DefaultPath returns the default config file path.
@@ -109,6 +112,19 @@ func (c *Config) MergedRules(dir string) ([]rule.Rule, error) {
 	}
 	merged = append(merged, c.Rules...)
 	return merged, nil
+}
+
+// EffectiveIgnore returns the global and per-directory ignore patterns for a
+// directory. Both lists are returned separately so the caller can evaluate
+// them in order (global first, local second) with .gitignore-style semantics.
+func (c *Config) EffectiveIgnore(dir string) (global, local []string) {
+	global = c.Ignore
+
+	dc, err := LoadDirConfig(dir)
+	if err != nil || dc == nil {
+		return global, nil
+	}
+	return global, dc.Ignore
 }
 
 // EnsureDirs creates the necessary directories.

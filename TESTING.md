@@ -115,6 +115,75 @@ Tests that all 16 action types with required fields produce errors when those fi
 - `isSubpath` — checks parent/child path relationships
 - `isValidOctalMode` — validates octal permission strings
 
+## Priority Tests
+
+| Test | What it verifies |
+|------|-----------------|
+| `TestFirstMatchPriority/higher_priority_wins` | Priority 10 matches before priority 0 |
+| `TestFirstMatchPriority/equal_priority_preserves_order` | Same priority uses declaration order |
+| `TestFirstMatchPriority/zero_priority_preserves_order` | Default behavior unchanged |
+| `TestFirstMatchPriority/per-dir_wins_at_same_priority` | Slice position tiebreaker |
+| `TestFirstMatchPriority/negative_priority` | Negative sorts after zero |
+
+## Ignore Pattern Tests
+
+| Test | What it verifies |
+|------|-----------------|
+| `TestShouldIgnoreGlobMatch` | `*.tmp` matches `data.tmp` |
+| `TestShouldIgnoreExactMatch` | `.DS_Store` exact match |
+| `TestShouldIgnoreCaseInsensitive` | `thumbs.db` matches `Thumbs.db` |
+| `TestShouldIgnoreNegation` | `!important.log` overrides `*.log` |
+| `TestShouldIgnoreLocalAddsToGlobal` | Local patterns merge with global |
+| `TestShouldIgnoreLocalNegatesGlobal` | `!*.tmp` locally overrides global `*.tmp` |
+| `TestShouldIgnoreLastMatchWins` | Pattern re-application follows last-match-wins |
+| `TestShouldIgnoreMultiplePatterns` | Table-driven: DS_Store, crdownload, office temp, resource fork, normal file, local override |
+
+## Content Matching Tests
+
+| Test | What it verifies |
+|------|-----------------|
+| `TestContentMatch/case-insensitive_substring` | `"invoice"` matches `"Invoice"` |
+| `TestContentMatch/substring_no_match` | `"receipt"` doesn't match |
+| `TestContentMatch/regex_match` | `#\d{5}` matches `#12345` |
+| `TestContentMatch/content_AND_extension` | Both conditions must pass |
+| `TestContentMatch/content_bytes_limit` | Only reads first N bytes |
+| `TestContentMatch/empty_file` | Empty file never matches |
+
+## Rate Limiter Tests
+
+| Test | What it verifies |
+|------|-----------------|
+| `TestRateLimiterNoLimit` | Zero limit doesn't block |
+| `TestRateLimiterGlobalThrottle` | Wait() blocks for rate limit duration |
+| `TestRateLimiterGlobalNoWaitAfterExpiry` | No wait after limit expires |
+| `TestRateLimiterCancelDuringWait` | Context cancellation during Wait() |
+| `TestRateLimiterAllowRule` | Cooldown blocks, different rules unaffected |
+| `TestRateLimiterAllowRuleAfterExpiry` | Cooldown expires correctly |
+| `TestRateLimiterZeroCooldownAlwaysAllows` | Zero cooldown = no throttle |
+| `TestRateLimiterConcurrentAccess` | Thread safety with 50 goroutines |
+
+## Config Hot-Reload Tests
+
+| Test | What it verifies |
+|------|-----------------|
+| `TestReloaderCurrent` | Returns initial config |
+| `TestReloaderReload` | Picks up new rules from disk |
+| `TestReloaderReloadInvalidConfig` | Invalid YAML preserves old config |
+| `TestReloaderConcurrentReads` | 100 concurrent goroutines + reload |
+| `TestReloaderWatchDetectsChange` | fsnotify detects config file write |
+| `TestIsConfigFile` | Identifies config.yaml and .sortie.yaml |
+
+## Action Help Tests
+
+| Test | What it verifies |
+|------|-----------------|
+| `TestAllActionsRegistered` | All 22 action types in registry |
+| `TestRegistryCount` | Exactly 22 entries |
+| `TestGetUnknown` | Unknown name returns false |
+| `TestHelpHasRequiredContent` | Every entry has name, description, example |
+| `TestFormatOutput` | Format produces expected sections |
+| `TestListSorted` | List returns alphabetical order |
+
 ## What Is Not Tested with Real Dispatch
 
 The `convert`, `watermark`, `ocr`, and `upload` dispatch happy paths require external tools (`ffmpeg`, `composite`, `tesseract`, `aws`/`gsutil`) that are not assumed to be installed. For these actions, tests cover:

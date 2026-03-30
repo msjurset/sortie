@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/msjurset/sortie/internal/config"
 	"github.com/msjurset/sortie/internal/dispatcher"
 	"github.com/msjurset/sortie/internal/history"
 	"github.com/msjurset/sortie/internal/rule"
@@ -19,8 +20,9 @@ import (
 )
 
 var watchFlags struct {
-	dryRun   bool
-	debounce time.Duration
+	dryRun    bool
+	debounce  time.Duration
+	rateLimit time.Duration
 }
 
 var watchCmd = &cobra.Command{
@@ -33,6 +35,7 @@ var watchCmd = &cobra.Command{
 func init() {
 	watchCmd.Flags().BoolVar(&watchFlags.dryRun, "dry-run", false, "log actions without executing")
 	watchCmd.Flags().DurationVar(&watchFlags.debounce, "debounce", 500*time.Millisecond, "debounce duration for file events")
+	watchCmd.Flags().DurationVar(&watchFlags.rateLimit, "rate-limit", 0, "minimum interval between dispatches (e.g., 500ms, 1s)")
 	rootCmd.AddCommand(watchCmd)
 }
 
@@ -46,7 +49,7 @@ func runWatch(cmd *cobra.Command, args []string) error {
 		dirs = append(dirs, d.Path)
 	}
 
-	logger := log.New(os.Stderr, "", log.LstdFlags)
+	logger := appLogger
 
 	store := history.NewStore(cfg.HistoryFile)
 	disp := dispatcher.New(store, dispatcher.WithTrashDir(cfg.TrashDir))
@@ -59,7 +62,7 @@ func runWatch(cmd *cobra.Command, args []string) error {
 	// Write PID file
 	pidPath := filepath.Join(filepath.Dir(cfg.HistoryFile), "sortie.pid")
 	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(os.Getpid())), 0o644); err != nil {
-		logger.Printf("warning: could not write PID file: %v", err)
+		logger.Warn("could not write PID file", "err", err)
 	}
 	defer os.Remove(pidPath)
 
@@ -71,6 +74,12 @@ func runWatch(cmd *cobra.Command, args []string) error {
 	ctx, stop2 := monitorBinary(ctx, logger)
 	defer stop2()
 
+	rl := dispatcher.NewRateLimiter(watchFlags.rateLimit)
+
+	// Start config hot-reload watcher
+	cfgReloader := config.NewReloader(cfg, configPath(), logger)
+	go cfgReloader.Watch(ctx, dirs)
+
 	fmt.Printf("Watching %d directory(ies)...\n", len(dirs))
 	for _, d := range dirs {
 		fmt.Printf("  %s\n", d)
@@ -81,67 +90,94 @@ func runWatch(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 
 	return w.Run(ctx, func(path string) {
+		// Use reloader snapshot for each file event
+		currentCfg := cfgReloader.Current()
+
 		dir := filepath.Dir(path)
-		rules, err := cfg.MergedRules(dir)
+		rules, err := currentCfg.MergedRules(dir)
 		if err != nil {
-			logger.Printf("error loading rules for %s: %v", dir, err)
+			logger.Error("loading rules", "dir", dir, "err", err)
 			return
 		}
 
 		fi, err := rule.NewFileInfo(path)
 		if err != nil {
-			logger.Printf("error stat %s: %v", path, err)
+			logger.Error("stat file", "path", path, "err", err)
 			return
 		}
 
-		matched := rule.FirstMatch(rules, fi)
-		if matched == nil {
+		globalIgnore, localIgnore := currentCfg.EffectiveIgnore(dir)
+		if rule.ShouldIgnore(globalIgnore, localIgnore, fi) {
 			if verbose {
-				logger.Printf("no match: %s", filepath.Base(path))
+				logger.Debug("ignored", "file", filepath.Base(path))
 			}
 			return
 		}
 
-		result, err := disp.Dispatch(fi, *matched, watchFlags.dryRun)
-		if err != nil {
-			logger.Printf("error: %v", err)
+		matches := rule.FindMatches(rules, fi)
+		if len(matches) == 0 {
+			if verbose {
+				logger.Debug("no match", "file", filepath.Base(path))
+			}
 			return
 		}
 
-		prefix := ""
-		if result.DryRun {
-			prefix = "[dry-run] "
+		for _, matched := range matches {
+			// Check per-rule cooldown
+			if matched.Cooldown != "" {
+				cd, _ := rule.ParseAge(matched.Cooldown)
+				if !rl.AllowRule(matched.Name, cd) {
+					if verbose {
+						logger.Debug("cooldown", "rule", matched.Name, "cooldown", matched.Cooldown)
+					}
+					continue
+				}
+			}
+
+			// Wait for global rate limit
+			if err := rl.Wait(ctx); err != nil {
+				return
+			}
+
+			result, err := disp.Dispatch(fi, *matched, watchFlags.dryRun)
+			if err != nil {
+				logger.Error("dispatch failed", "err", err)
+				continue
+			}
+
+			rl.Record(matched.Name)
+
+			logger.Info("dispatched",
+				"rule", matched.Name,
+				"action", result.Record.Action,
+				"src", filepath.Base(result.Record.Src),
+				"dest", result.Record.Dest,
+				"dry_run", result.DryRun,
+			)
 		}
-		fmt.Printf("%s%s %s -> %s (%s)\n",
-			prefix,
-			result.Record.Action,
-			filepath.Base(result.Record.Src),
-			result.Record.Dest,
-			matched.Name,
-		)
 	})
 }
 
 // monitorBinary polls the running binary's modification time and cancels the
 // context when it changes, allowing launchd's KeepAlive to relaunch with the
 // new version.
-func monitorBinary(parent context.Context, logger *log.Logger) (context.Context, context.CancelFunc) {
+func monitorBinary(parent context.Context, logger *slog.Logger) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(parent)
 
 	exe, err := os.Executable()
 	if err != nil {
-		logger.Printf("warning: cannot monitor binary: %v", err)
+		logger.Warn("cannot monitor binary", "err", err)
 		return ctx, cancel
 	}
 	exe, err = filepath.EvalSymlinks(exe)
 	if err != nil {
-		logger.Printf("warning: cannot resolve binary path: %v", err)
+		logger.Warn("cannot resolve binary path", "err", err)
 		return ctx, cancel
 	}
 
 	info, err := os.Stat(exe)
 	if err != nil {
-		logger.Printf("warning: cannot stat binary: %v", err)
+		logger.Warn("cannot stat binary", "err", err)
 		return ctx, cancel
 	}
 	startMod := info.ModTime()
@@ -159,7 +195,7 @@ func monitorBinary(parent context.Context, logger *log.Logger) (context.Context,
 					continue
 				}
 				if !info.ModTime().Equal(startMod) {
-					logger.Printf("binary changed, restarting...")
+					logger.Info("binary changed, restarting")
 					cancel()
 					return
 				}

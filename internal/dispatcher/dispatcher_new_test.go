@@ -69,6 +69,51 @@ func TestDispatchExtractZip(t *testing.T) {
 	}
 }
 
+func TestDispatchExtractZipSkipsMacOSMetadata(t *testing.T) {
+	srcDir := t.TempDir()
+	destDir := t.TempDir()
+	disp, _ := newTestDispatcher(t)
+
+	// Create a zip with __MACOSX metadata (like Finder creates)
+	zipPath := filepath.Join(srcDir, "test.zip")
+	createTestZip(t, zipPath, map[string]string{
+		"hello.txt":              "hello world",
+		"__MACOSX/._hello.txt":  "resource fork data",
+		"__MACOSX/.DS_Store":    "ds store data",
+		".DS_Store":             "root ds store",
+	})
+
+	fi, err := rule.NewFileInfo(zipPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	extractDir := filepath.Join(destDir, "extracted")
+	r := rule.Rule{
+		Name:   "test-extract-no-macos",
+		Action: rule.Action{Type: rule.ActionExtract, Dest: extractDir},
+	}
+
+	if _, err := disp.Dispatch(fi, r, false); err != nil {
+		t.Fatalf("Dispatch() error: %v", err)
+	}
+
+	// Real file should exist
+	if _, err := os.Stat(filepath.Join(extractDir, "hello.txt")); err != nil {
+		t.Error("hello.txt should be extracted")
+	}
+
+	// __MACOSX directory should NOT exist
+	if _, err := os.Stat(filepath.Join(extractDir, "__MACOSX")); !os.IsNotExist(err) {
+		t.Error("__MACOSX should be skipped during extraction")
+	}
+
+	// .DS_Store should NOT exist
+	if _, err := os.Stat(filepath.Join(extractDir, ".DS_Store")); !os.IsNotExist(err) {
+		t.Error(".DS_Store should be skipped during extraction")
+	}
+}
+
 func TestDispatchExtractTarGz(t *testing.T) {
 	srcDir := t.TempDir()
 	destDir := t.TempDir()

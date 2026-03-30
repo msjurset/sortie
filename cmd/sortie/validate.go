@@ -104,6 +104,28 @@ func runValidate(cmd *cobra.Command, args []string) error {
 
 	findings := rule.ValidateRules(unique, watchedDirs)
 
+	// Validate ignore patterns
+	findings = append(findings, rule.ValidateIgnorePatterns(cfg.Ignore, "global config")...)
+	if len(args) > 0 {
+		for _, dir := range args {
+			dir = expandHome(dir)
+			if abs, err := filepath.Abs(dir); err == nil {
+				dir = abs
+			}
+			dc, _ := config.LoadDirConfig(dir)
+			if dc != nil {
+				findings = append(findings, rule.ValidateIgnorePatterns(dc.Ignore, dir)...)
+			}
+		}
+	} else {
+		for _, d := range cfg.Directories {
+			dc, _ := config.LoadDirConfig(d.Path)
+			if dc != nil {
+				findings = append(findings, rule.ValidateIgnorePatterns(dc.Ignore, d.Path)...)
+			}
+		}
+	}
+
 	if len(findings) == 0 {
 		fmt.Printf("All %d rule(s) valid.\n", len(unique))
 		return nil

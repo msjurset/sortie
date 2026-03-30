@@ -52,6 +52,11 @@ func extractZip(src, dest string) error {
 	defer r.Close()
 
 	for _, f := range r.File {
+		// Skip macOS Finder metadata
+		if isMetadataEntry(f.Name) {
+			continue
+		}
+
 		target := filepath.Join(dest, f.Name)
 
 		// Guard against zip slip
@@ -146,6 +151,11 @@ func extractTarReader(tr *tar.Reader, dest string) error {
 			return fmt.Errorf("reading tar: %w", err)
 		}
 
+		// Skip macOS Finder metadata
+		if isMetadataEntry(hdr.Name) {
+			continue
+		}
+
 		target := filepath.Join(dest, hdr.Name)
 
 		// Guard against path traversal
@@ -184,6 +194,26 @@ func extractTarReader(tr *tar.Reader, dest string) error {
 }
 
 // doSymlink creates a symbolic link at dest pointing to the source file.
+// isMetadataEntry returns true for archive entries that are OS-specific
+// metadata and should be skipped during extraction (e.g., macOS __MACOSX
+// resource forks, .DS_Store files).
+func isMetadataEntry(name string) bool {
+	// macOS Finder resource fork directory
+	if strings.HasPrefix(name, "__MACOSX/") || name == "__MACOSX" {
+		return true
+	}
+	// macOS resource fork files (._filename)
+	base := filepath.Base(name)
+	if strings.HasPrefix(base, "._") {
+		return true
+	}
+	// .DS_Store
+	if base == ".DS_Store" {
+		return true
+	}
+	return false
+}
+
 func doSymlink(src, dest string) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return fmt.Errorf("creating directory: %w", err)
