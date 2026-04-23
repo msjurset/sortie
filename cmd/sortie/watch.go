@@ -44,9 +44,14 @@ func runWatch(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no directories configured to watch")
 	}
 
-	var dirs []string
+	var dirs []watcher.DirOption
+	var dirPaths []string
 	for _, d := range cfg.Directories {
-		dirs = append(dirs, d.Path)
+		dirs = append(dirs, watcher.DirOption{
+			Path:          d.Path,
+			WatchExisting: d.WatchExisting,
+		})
+		dirPaths = append(dirPaths, d.Path)
 	}
 
 	logger := appLogger
@@ -78,11 +83,15 @@ func runWatch(cmd *cobra.Command, args []string) error {
 
 	// Start config hot-reload watcher
 	cfgReloader := config.NewReloader(cfg, configPath(), logger)
-	go cfgReloader.Watch(ctx, dirs)
+	go cfgReloader.Watch(ctx, dirPaths)
 
 	fmt.Printf("Watching %d directory(ies)...\n", len(dirs))
 	for _, d := range dirs {
-		fmt.Printf("  %s\n", d)
+		suffix := ""
+		if d.WatchExisting {
+			suffix = " (watch_existing)"
+		}
+		fmt.Printf("  %s%s\n", d.Path, suffix)
 	}
 	if watchFlags.dryRun {
 		fmt.Println("  (dry-run mode)")

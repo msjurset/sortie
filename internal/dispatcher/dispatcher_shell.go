@@ -19,23 +19,22 @@ func lookPathOrError(tool, actionType string) error {
 	return nil
 }
 
-// doExec runs an arbitrary shell command with template-expanded variables.
 func doExec(fi rule.FileInfo, action rule.Action, captures map[string]string) error {
 	cmd, err := rule.ExpandString(action.Command, fi, captures)
 	if err != nil {
 		return fmt.Errorf("expanding command template: %w", err)
 	}
 
-	out, err := exec.Command("sh", "-c", cmd).CombinedOutput()
+	out, err := runShellCommand(cmd)
 	if err != nil {
 		return fmt.Errorf("exec %q: %s: %w", cmd, strings.TrimSpace(string(out)), err)
 	}
 	return nil
 }
 
-// doNotify sends a notification. On macOS, it uses osascript for desktop
-// notifications. If the message field starts with http:// or https://, it
-// sends an HTTP POST with file metadata as JSON.
+// doNotify sends a notification. If the message field starts with http:// or
+// https://, it sends an HTTP POST with file metadata as JSON. Otherwise it
+// delegates to the platform-specific notifyDesktop.
 func doNotify(fi rule.FileInfo, action rule.Action, captures map[string]string) error {
 	title, err := rule.ExpandString(action.Title, fi, captures)
 	if err != nil {
@@ -51,22 +50,11 @@ func doNotify(fi rule.FileInfo, action rule.Action, captures map[string]string) 
 		title = "sortie"
 	}
 
-	// Webhook mode
 	if strings.HasPrefix(message, "http://") || strings.HasPrefix(message, "https://") {
 		return notifyWebhook(message, title, fi)
 	}
 
-	// macOS desktop notification
 	return notifyDesktop(title, message)
-}
-
-func notifyDesktop(title, message string) error {
-	script := fmt.Sprintf(`display notification %q with title %q`, message, title)
-	out, err := exec.Command("osascript", "-e", script).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("osascript: %s: %w", strings.TrimSpace(string(out)), err)
-	}
-	return nil
 }
 
 func notifyWebhook(url, title string, fi rule.FileInfo) error {

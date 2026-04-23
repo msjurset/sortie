@@ -26,8 +26,10 @@ and apply matching rules. With no arguments, scans all configured directories.
 Use \fB\-\-dry\-run\fR to preview without executing.
 .TP
 .B watch
-Watch all configured directories for new files in real time. Runs as a
-foreground daemon with configurable debounce. Monitors its own binary and
+Watch all configured directories for new files in real time. Directories with
+\fBwatch_existing: true\fR also react to write events on existing files (e.g.,
+a log file growing past a size threshold). Runs as a foreground daemon with
+configurable debounce. Monitors its own binary and
 exits gracefully when a new version is deployed. Automatically reloads
 configuration files when they change, so edits to
 \fI~/.config/sortie/config.yaml\fR or any \fI.sortie.yaml\fR take effect
@@ -154,6 +156,8 @@ log_format: text    # text or json
 directories:
   \- path: ~/Downloads
     recursive: false
+  \- path: /var/log/myapp
+    watch_existing: true
 
 ignore:
   \- "*.DS_Store"
@@ -169,6 +173,14 @@ rules:
       type: move
       dest: ~/Pictures/Sorted/{{.Year}}/{{.Month}}
 .fi
+.PP
+.B watch_existing
+when set to \fBtrue\fR on a directory entry, the watcher also reacts to write
+events on existing files (not just newly created files). This is useful for
+monitoring files that grow over time, such as log files. Combine with
+\fBmin_size\fR match conditions and per\-rule \fBcooldown\fR to dispatch when a
+file exceeds a threshold without re\-triggering on every write. Changing this
+setting requires a daemon restart. Default: \fBfalse\fR.
 .PP
 .B log_format
 sets the log output format globally (\fBtext\fR or \fBjson\fR). Can be
@@ -297,11 +309,14 @@ sidecar path.
 .TP
 .B exec
 Run an arbitrary shell command. The \fBcommand\fR field is template\-expanded (supports
-\fB{{.Path}}\fR for full file path). Not undoable.
+\fB{{.Path}}\fR for full file path). Runs through \fBsh\fR on Unix and \fBcmd.exe\fR
+on Windows. Not undoable.
 .TP
 .B notify
-Send a desktop notification (macOS via \fBosascript\fR) or webhook. If \fBmessage\fR
-starts with http:// or https://, an HTTP POST with file metadata is sent. Requires
+Send a desktop notification or webhook. Uses \fBosascript\fR on macOS,
+\fBnotify\-send\fR on Linux, and PowerShell \fBBurntToast\fR on Windows (with a
+stderr fallback when BurntToast is not installed). If \fBmessage\fR starts with
+http:// or https://, an HTTP POST with file metadata is sent instead. Requires
 \fBtitle\fR and \fBmessage\fR fields. Not undoable.
 .TP
 .B convert
@@ -748,6 +763,21 @@ rules:
     action:
       type: tag
       tags: [Green, Finance]
+.fi
+.PP
+Trigger log rotation when a file grows past 100MB (requires \fBwatch_existing: true\fR
+on the directory):
+.PP
+.nf
+rules:
+  \- name: rotate\-large\-logs
+    match:
+      extensions: [.log]
+      min_size: 100MB
+    cooldown: 5m
+    action:
+      type: exec
+      command: "runbook run rotate\-logs \-\-file '{{.Path}}'"
 .fi
 .PP
 Compress old log files:

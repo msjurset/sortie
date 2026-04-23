@@ -189,6 +189,39 @@ func TestEnsureDirs(t *testing.T) {
 	}
 }
 
+func TestLoadConfigWatchExisting(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+
+	content := `
+directories:
+  - path: /var/log/myapp
+    watch_existing: true
+  - path: /tmp/downloads
+    recursive: false
+
+rules: []
+`
+	if err := os.WriteFile(cfgPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if len(cfg.Directories) != 2 {
+		t.Fatalf("expected 2 directories, got %d", len(cfg.Directories))
+	}
+	if !cfg.Directories[0].WatchExisting {
+		t.Error("expected WatchExisting=true for first directory")
+	}
+	if cfg.Directories[1].WatchExisting {
+		t.Error("expected WatchExisting=false (default) for second directory")
+	}
+}
+
 func TestExpandHome(t *testing.T) {
 	home, _ := os.UserHomeDir()
 

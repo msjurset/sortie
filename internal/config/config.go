@@ -23,8 +23,9 @@ type Config struct {
 
 // Directory represents a watched directory entry.
 type Directory struct {
-	Path      string `yaml:"path"`
-	Recursive bool   `yaml:"recursive"`
+	Path          string `yaml:"path"`
+	Recursive     bool   `yaml:"recursive"`
+	WatchExisting bool   `yaml:"watch_existing"`
 }
 
 // DirConfig holds per-directory rules from a .sortie.yaml file.

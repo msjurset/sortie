@@ -8,6 +8,7 @@ Intelligent file dispatcher — rule-based file routing for directories like `~/
 - **22 action types** — move, copy, rename, delete, compress, extract, symlink, chmod, checksum, exec, notify, convert, resize, watermark, ocr, encrypt, decrypt, upload, tag, open, deduplicate, unquarantine
 - **Hybrid config** — central `~/.config/sortie/config.yaml` plus per-directory `.sortie.yaml` overrides
 - **Watch mode** — real-time file monitoring with fsnotify and configurable debounce
+- **Watch existing files** — monitor existing files for changes (e.g., log growth past a size threshold) with `watch_existing: true`
 - **Dry-run mode** — preview what would happen before committing
 - **Undo** — reverse recent actions from the history log
 - **Template destinations** — use `{{.Year}}`, `{{.Month}}`, `{{.Name}}`, `{{.Ext}}`, `{{.Path}}` in dest paths and action fields
@@ -157,6 +158,8 @@ directories:
     recursive: false
   - path: ~/Desktop
     recursive: false
+  - path: /var/log/myapp
+    watch_existing: true    # react to writes on existing files (e.g., growing logs)
 
 rules:
   - name: images-to-photos
@@ -324,6 +327,17 @@ rules:
       glob: "trusted-*"
     action:
       type: unquarantine
+
+  # Trigger log rotation when a log file grows past 100MB.
+  # Requires watch_existing: true on the directory.
+  - name: rotate-large-logs
+    match:
+      extensions: [.log]
+      min_size: 100MB
+    cooldown: 5m
+    action:
+      type: exec
+      command: "runbook run rotate-logs --file '{{.Path}}'"
 
   # Use named capture groups in content_regex to extract values from file
   # content and reference them in templates as {{.Match.name}}.
@@ -500,7 +514,7 @@ Some action types shell out to external tools. Install only the tools you need:
 | `decrypt` | `age` | `brew install age` | `gpg` |
 | `upload` | auto-detect from URI | `brew install awscli` | `gsutil` |
 | `tag` | `xattr` | Built-in (macOS) | — |
-| `notify` | `osascript` | Built-in (macOS) | HTTP webhook |
+| `notify` | `osascript` (macOS), `notify-send` (Linux), `BurntToast` (Windows) | Built-in (macOS); `apt install libnotify-bin` (Linux); `Install-Module BurntToast` (Windows) | HTTP webhook |
 | `extract` | Go stdlib | Built-in | `tar` for .tar.xz only |
 | `open` | `open` | Built-in (macOS) | — |
 | `content`/`content_regex` (PDF) | `pdftotext` | `brew install poppler` | — |
@@ -538,6 +552,16 @@ Actions that require a missing tool will fail with a clear error message indicat
       width: 1920
       dest: ~/Pictures/Resized/{{.Name}}{{.Ext}}
 ```
+
+## Platform Support
+
+sortie builds and runs on macOS, Linux, and Windows. The watcher itself (`sortie watch`) is cross-platform. A few action types are macOS-only and will error on other platforms:
+
+- `open` — uses macOS `open(1)`
+- `tag` — uses macOS Finder tags via `xattr`
+- `unquarantine` — macOS-specific extended attribute (no-op on Linux/Windows)
+
+`notify` and `exec` work on all platforms: `exec` runs commands through `sh` on Unix and `cmd.exe` on Windows; `notify` uses `osascript` (macOS), `notify-send` (Linux), and `BurntToast` on Windows with a stderr fallback.
 
 ## Running as a Service (macOS)
 

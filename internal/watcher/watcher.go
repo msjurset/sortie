@@ -17,36 +17,48 @@ var tempSuffixes = []string{
 	".crdownload", ".part", ".partial", ".download", ".tmp",
 }
 
+// DirOption holds per-directory settings for the watcher.
+type DirOption struct {
+	Path          string
+	WatchExisting bool
+}
+
 // Watcher monitors directories for new files and calls a handler after a
 // debounce period.
 type Watcher struct {
-	fsw      *fsnotify.Watcher
-	debounce time.Duration
-	mu       sync.Mutex
-	timers   map[string]*time.Timer
-	handler  func(path string)
-	logger   *slog.Logger
+	fsw           *fsnotify.Watcher
+	debounce      time.Duration
+	mu            sync.Mutex
+	timers        map[string]*time.Timer
+	watchExisting map[string]bool
+	handler       func(path string)
+	logger        *slog.Logger
 }
 
 // New creates a Watcher that monitors the given directories.
-func New(dirs []string, debounce time.Duration, logger *slog.Logger) (*Watcher, error) {
+func New(dirs []DirOption, debounce time.Duration, logger *slog.Logger) (*Watcher, error) {
 	fsw, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, err
 	}
 
-	for _, dir := range dirs {
-		if err := fsw.Add(dir); err != nil {
+	we := make(map[string]bool)
+	for _, d := range dirs {
+		if err := fsw.Add(d.Path); err != nil {
 			fsw.Close()
 			return nil, err
+		}
+		if d.WatchExisting {
+			we[d.Path] = true
 		}
 	}
 
 	return &Watcher{
-		fsw:      fsw,
-		debounce: debounce,
-		timers:   make(map[string]*time.Timer),
-		logger:   logger,
+		fsw:           fsw,
+		debounce:      debounce,
+		timers:        make(map[string]*time.Timer),
+		watchExisting: we,
+		logger:        logger,
 	}, nil
 }
 
@@ -76,11 +88,23 @@ func (w *Watcher) Run(ctx context.Context, handler func(path string)) error {
 }
 
 func (w *Watcher) handleEvent(event fsnotify.Event) {
-	if !event.Has(fsnotify.Create) && !event.Has(fsnotify.Rename) {
+	isCreate := event.Has(fsnotify.Create) || event.Has(fsnotify.Rename)
+	isWrite := event.Has(fsnotify.Write)
+
+	if !isCreate && !isWrite {
 		return
 	}
 
 	path := event.Name
+
+	// For write events, only proceed if the directory has watch_existing enabled
+	if isWrite && !isCreate {
+		dir := filepath.Dir(path)
+		if !w.watchExisting[dir] {
+			return
+		}
+	}
+
 	name := filepath.Base(path)
 
 	// Skip directories
