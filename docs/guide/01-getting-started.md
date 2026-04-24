@@ -57,7 +57,7 @@ sortie --version
 sortie config init
 ```
 
-This writes `~/.config/sortie/config.yaml` on macOS and Linux, or `%APPDATA%\sortie\config.yaml` on Windows, with a handful of sensible starter rules for a `~/Downloads` directory. Open it in your editor:
+This writes `~/.config/sortie/config.yaml` (on Windows this resolves to `C:\Users\<you>\.config\sortie\config.yaml` — sortie uses the Unix-style config layout on every platform). The starter file contains a handful of sensible rules for a `~/Downloads` directory. Open it in your editor:
 
 ```sh
 sortie config path    # prints the absolute path
