@@ -2,6 +2,8 @@
 
 Intelligent file dispatcher — rule-based file routing for directories like `~/Downloads` and `~/Desktop`.
 
+> 📖 **New to sortie?** Start with the [User Guide](docs/guide/) — a tutorial, cookbook, and troubleshooting reference.
+
 ## Features
 
 - **Rule-based matching** — match files by extension, glob, regex, size, age, or MIME type
