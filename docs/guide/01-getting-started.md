@@ -1,33 +1,156 @@
 # Getting Started
 
-> **Status:** scaffolding — full content lands in a follow-up PR.
+This is a ten-minute tour. By the end you'll have sortie installed, a starter config in place, and a daemon watching `~/Downloads` that automatically moves files based on rules you control.
 
-A 10-minute tour: install sortie, generate a starter config, safely preview what it would do, run it for real, and leave a daemon watching your Downloads folder.
+If anything feels magical, skip ahead to [Concepts](02-concepts.md) afterwards — it explains the moving parts.
 
-## Install
+## 1. Install
 
-Platform tabs: macOS (tarball; optional `brew install poppler` for PDF matching), Linux (tarball; `apt install libnotify-bin` for desktop notifications), Windows (zip; optional `Install-Module BurntToast` for toast notifications).
+sortie ships prebuilt binaries for macOS, Linux, and Windows on the [Releases page](https://github.com/msjurset/sortie/releases). Pick the archive for your OS, extract it, and put the binary somewhere on your `PATH`.
 
-## Your first config
+### macOS
 
-Walk through `sortie init` and what it writes to `~/.config/sortie/config.yaml`.
+```sh
+# Apple Silicon (M-series)
+curl -L -o sortie.tar.gz https://github.com/msjurset/sortie/releases/latest/download/sortie-$(curl -s https://api.github.com/repos/msjurset/sortie/releases/latest | grep tag_name | cut -d'"' -f4 | sed 's/^v//')-darwin-arm64.tar.gz
 
-## Safe preview with `--dry-run`
+# Intel
+# curl -L -o sortie.tar.gz https://github.com/msjurset/sortie/releases/latest/download/sortie-<version>-darwin-amd64.tar.gz
 
-Demo `sortie scan --dry-run`. Asciinema cast of the output.
+tar -xzf sortie.tar.gz
+mv sortie ~/.local/bin/      # or anywhere on $PATH
+sortie --version
+```
 
-## Running for real
+> **Optional dependencies (macOS)**
+> - `brew install poppler` — enables PDF content matching (the `content` / `content_regex` match conditions on `.pdf` files).
+> - `brew install imagemagick` — enables the `watermark` and alternative `resize` actions. `sips` (built in) handles basic resize by default.
 
-`sortie scan`, inspecting `sortie history`, undoing with `sortie undo`.
+### Linux
 
-## Adding a second rule
+```sh
+curl -L -o sortie.tar.gz https://github.com/msjurset/sortie/releases/latest/download/sortie-<version>-linux-amd64.tar.gz
+tar -xzf sortie.tar.gz
+sudo mv sortie /usr/local/bin/
+sortie --version
+```
 
-Edit the YAML to add a PDF-filing rule. Brief mention of priority (forward-link to Concepts).
+> **Optional dependencies (Linux)**
+> - `apt install libnotify-bin` (or distro equivalent) — enables the `notify` action. Without `notify-send` on `PATH`, the action returns a clear error.
+> - `apt install poppler-utils` — enables PDF content matching.
+> - `apt install imagemagick` — enables `watermark` and `resize`.
 
-## Watching in real time
+### Windows
 
-`sortie watch`, drop a file, observe auto-move. Asciinema cast.
+1. Download `sortie-<version>-windows-amd64.zip` from the [latest release](https://github.com/msjurset/sortie/releases/latest).
+2. Extract the zip. It contains `sortie.exe` and the `sortie.1` man page.
+3. Move `sortie.exe` to a directory on your `PATH` (e.g. `C:\Users\<you>\bin\`, or add the extract location to `PATH`).
+4. Open a new terminal and run `sortie --version` to confirm.
+
+> **Optional dependencies (Windows)**
+> - In an elevated PowerShell: `Install-Module -Name BurntToast` — enables toast notifications for the `notify` action. Without BurntToast, notifications fall back to stderr.
+> - The `open`, `tag`, and `unquarantine` actions are macOS-only and will return a clear error on Windows.
+
+## 2. Generate a starter config
+
+```sh
+sortie config init
+```
+
+This writes `~/.config/sortie/config.yaml` (on Windows this resolves to `C:\Users\<you>\.config\sortie\config.yaml` — sortie uses the Unix-style config layout on every platform). The starter file contains a handful of sensible rules for a `~/Downloads` directory. Open it in your editor:
+
+```sh
+sortie config path    # prints the absolute path
+$EDITOR "$(sortie config path)"
+```
+
+You'll see two top-level sections: `directories:` (what to watch) and `rules:` (what to do). The starter file contains rules for screen captures and installers, plus commented-out examples for images and PDFs.
+
+## 3. Preview before touching anything
+
+**Always** run `--dry-run` the first time you point sortie at a real directory. It walks the directory, matches every file against your rules, and logs what *would* happen — without moving, renaming, or deleting anything.
+
+```sh
+sortie scan --dry-run
+```
+
+<!-- TODO: embed asciinema cast — assets/01-dry-run.svg -->
+
+Every line shows `[rule-name] /path/to/file → /destination`. If you see files that match the wrong rule, edit the YAML and rerun `--dry-run` until you're happy. Nothing on disk has changed yet.
+
+## 4. Run it for real
+
+Once the preview looks right, run it without `--dry-run`:
+
+```sh
+sortie scan
+```
+
+sortie walks the directory and executes the matched action for each file. To see what it did, check the history:
+
+```sh
+sortie history
+```
+
+<!-- TODO: embed asciinema cast — assets/02-scan-history.svg -->
+
+Each record has an ID. If something was moved somewhere you didn't intend, undo the last action:
+
+```sh
+sortie undo                 # undo the most recent action
+sortie undo --last 3        # undo the last three
+```
+
+Not every action is reversible — `exec`, `notify`, and `open` can't be undone because they don't produce a file we can put back. The history still records them, but `undo` will skip with a clear message.
+
+## 5. Add your own rule
+
+Let's file every PDF into `~/Documents/PDFs/`. Open your config:
+
+```sh
+$EDITOR "$(sortie config path)"
+```
+
+Add a new entry under `rules:` (above the existing rules if you want it to match first — see the [priority note](02-concepts.md#rules) later):
+
+```yaml
+  - name: file-pdfs
+    match:
+      extensions: [.pdf]
+    action:
+      type: move
+      dest: ~/Documents/PDFs/{{.Name}}{{.Ext}}
+```
+
+Drop a PDF into `~/Downloads` and run:
+
+```sh
+sortie scan --dry-run
+```
+
+You should see `[file-pdfs] ~/Downloads/your.pdf → ~/Documents/PDFs/your.pdf`. Remove `--dry-run` to actually move it.
+
+Template variables like `{{.Name}}` and `{{.Ext}}` come from the filename. The full list is in [Concepts › Templates](02-concepts.md#templates).
+
+## 6. Watch in real time
+
+Running `scan` manually is fine, but the real power is the watch daemon: sortie monitors your directories and dispatches files as soon as they arrive (with a short debounce to let in-progress downloads finish).
+
+```sh
+sortie watch
+```
+
+<!-- TODO: embed asciinema cast — assets/03-watch.svg -->
+
+Leave this running in a terminal, then drag a file into `~/Downloads` from another window. Within a second, you'll see the dispatch line in the watch output, and the file will be gone from Downloads. Press `Ctrl-C` to stop.
+
+For a permanent background service, head to [Running as a Service](06-running-as-a-service.md) — full per-platform walk-throughs for macOS launchd, Linux systemd user units, and Windows Task Scheduler.
 
 ## What's next
 
-Link to [Concepts](02-concepts.md) and [Cookbook](03-cookbook.md).
+- [Concepts](02-concepts.md) — the mental model behind rules, matches, actions, chains, and the watch daemon. Read this once; everything else clicks faster afterwards.
+- [Cookbook](03-cookbook.md) — at least one recipe per action type, plus real-world multi-step chains.
+- [Reference](04-reference.md) — quick-lookup tables for subcommands, match conditions, actions, and template variables.
+- [Troubleshooting](05-troubleshooting.md) — symptom-driven fixes for common issues.
+- [Running as a Service](06-running-as-a-service.md) — set up the watch daemon for permanent background operation.
+- [Thinking in sortie](07-thinking-in-sortie.md) — once you've got a few rules working, this page is about how to organize them well.
