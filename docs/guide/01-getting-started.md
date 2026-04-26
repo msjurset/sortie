@@ -153,3 +153,4 @@ For a permanent background service, head to [Running as a Service](06-running-as
 - [Reference](04-reference.md) — quick-lookup tables for subcommands, match conditions, actions, and template variables.
 - [Troubleshooting](05-troubleshooting.md) — symptom-driven fixes for common issues.
 - [Running as a Service](06-running-as-a-service.md) — set up the watch daemon for permanent background operation.
+- [Thinking in sortie](07-thinking-in-sortie.md) — once you've got a few rules working, this page is about how to organize them well.

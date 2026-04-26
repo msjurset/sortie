@@ -522,7 +522,7 @@ Now every dispatched file leaves an audit-log entry, and the actual filing decis
 
 The cycle from the [safety net](#worked-example-a-safe-iteration-loop) section above is the single highest-leverage habit. Every config change goes through `sortie validate` → `sortie scan --dry-run` → real run. If a recipe in the cookbook isn't doing what you expect, the dry-run output will tell you which rule actually fired (or didn't) before you let any side effect happen.
 
-A future page (`07-thinking-in-sortie.md`, queued) will go deeper on rule-set design patterns and migrating from other file-organization tools. For now, you have enough mental model to start writing rules.
+For deeper coverage of rule-set design patterns, the iterative debugging workflow, and migrating from Hazel / Maid / cron+find, see [Thinking in sortie](07-thinking-in-sortie.md). For now, you have enough mental model to start writing rules.
 
 ---
 

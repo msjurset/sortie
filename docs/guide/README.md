@@ -14,6 +14,7 @@ You're comfortable on a terminal and can edit YAML. You don't need to be a Go pr
 4. [Reference](04-reference.md) — quick-reference tables for flags, match conditions, actions, and template variables.
 5. [Troubleshooting](05-troubleshooting.md) — symptom-driven fixes for the most common problems.
 6. [Running as a Service](06-running-as-a-service.md) — full walk-throughs for launchd (macOS), systemd user units (Linux), and Task Scheduler (Windows).
+7. [Thinking in sortie](07-thinking-in-sortie.md) — design patterns, iterative workflow, migration recipes from Hazel/Maid/cron+find, and anti-patterns to skip past.
 
 ## Platform support
 
