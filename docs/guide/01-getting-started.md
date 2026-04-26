@@ -144,13 +144,7 @@ sortie watch
 
 Leave this running in a terminal, then drag a file into `~/Downloads` from another window. Within a second, you'll see the dispatch line in the watch output, and the file will be gone from Downloads. Press `Ctrl-C` to stop.
 
-For a permanent background service:
-
-- **macOS** — `make install-launchd` installs a user agent that starts at login. (Covered in the root README's "Running as a Service" section.)
-- **Linux** — wrap `sortie watch` in a systemd user unit.
-- **Windows** — create a Task Scheduler task that runs `sortie.exe watch` at logon.
-
-Detailed service setup per platform lives in the [Cookbook](03-cookbook.md) and [Troubleshooting](05-troubleshooting.md) pages.
+For a permanent background service, head to [Running as a Service](06-running-as-a-service.md) — full per-platform walk-throughs for macOS launchd, Linux systemd user units, and Windows Task Scheduler.
 
 ## What's next
 
@@ -158,3 +152,4 @@ Detailed service setup per platform lives in the [Cookbook](03-cookbook.md) and 
 - [Cookbook](03-cookbook.md) — at least one recipe per action type, plus real-world multi-step chains.
 - [Reference](04-reference.md) — quick-lookup tables for subcommands, match conditions, actions, and template variables.
 - [Troubleshooting](05-troubleshooting.md) — symptom-driven fixes for common issues.
+- [Running as a Service](06-running-as-a-service.md) — set up the watch daemon for permanent background operation.
