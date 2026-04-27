@@ -2,7 +2,17 @@
 
 Intelligent file dispatcher — rule-based file routing for directories like `~/Downloads` and `~/Desktop`.
 
-> 📖 **New to sortie?** Start with the [User Guide](docs/guide/) — a tutorial, cookbook, and troubleshooting reference.
+## 📚 Documentation
+
+This README is a feature/reference overview. The **[User Guide in `docs/guide/`](docs/guide/)** is where to look for learning sortie, working through real-world examples, and debugging issues:
+
+- **[Getting Started](docs/guide/01-getting-started.md)** — install + 10-minute tour
+- **[Concepts](docs/guide/02-concepts.md)** — mental model with diagrams
+- **[Cookbook](docs/guide/03-cookbook.md)** — ~30 recipes covering every action type plus multi-step chains
+- **[Reference](docs/guide/04-reference.md)** — exhaustive schema and grammar reference
+- **[Troubleshooting](docs/guide/05-troubleshooting.md)** — symptom-driven fixes with decision trees
+- **[Running as a Service](docs/guide/06-running-as-a-service.md)** — launchd / systemd / Task Scheduler walk-throughs
+- **[Thinking in sortie](docs/guide/07-thinking-in-sortie.md)** — design patterns, migrations, anti-patterns
 
 ## Features
 
@@ -27,11 +37,36 @@ Intelligent file dispatcher — rule-based file routing for directories like `~/
 
 ## Install
 
+### macOS (Homebrew)
+
+```sh
+brew install msjurset/tap/sortie
 ```
+
+The formula installs the binary, man page, and zsh + bash completions. To get updates: `brew upgrade msjurset/tap/sortie`.
+
+### Windows (Scoop)
+
+```powershell
+scoop bucket add msjurset https://github.com/msjurset/scoop-bucket
+scoop install sortie
+```
+
+To get updates: `scoop update sortie`.
+
+### Linux / cross-platform (download a release archive)
+
+Grab the appropriate archive from the [Releases page](https://github.com/msjurset/sortie/releases/latest), extract it, and put `sortie` (or `sortie.exe` on Windows) somewhere on your `PATH`. Per-OS install steps with optional dependencies are in **[Getting Started](docs/guide/01-getting-started.md#install)**.
+
+### From source
+
+```sh
 make deploy
 ```
 
-This builds the binary, installs it to `~/.local/bin/`, installs the man page, and sets up zsh completions.
+Builds the binary, installs it to `~/.local/bin/`, installs the man page, and sets up zsh completions. Requires Go 1.26+.
+
+> **First time using sortie?** Once installed, the **[10-minute Getting Started tour](docs/guide/01-getting-started.md)** walks you from `sortie config init` through writing your first rule and watching it move a file.
 
 ## Usage
 
@@ -143,6 +178,8 @@ sortie trash purge
 ```
 
 ## Configuration
+
+> **For learning:** the **[Concepts](docs/guide/02-concepts.md)** and **[Cookbook](docs/guide/03-cookbook.md)** pages walk through how rules, matches, and chains compose, with ~30 worked-through recipes. **[Reference appendices](docs/guide/04-reference.md#appendices)** have the complete YAML schema for every action type.
 
 ### Central Config (`~/.config/sortie/config.yaml`)
 
@@ -567,7 +604,9 @@ sortie builds and runs on macOS, Linux, and Windows. The watcher itself (`sortie
 
 ## Running as a Service (macOS)
 
-To run sortie automatically in the background, install it as a launchd user agent:
+> Looking for **Linux systemd** or **Windows Task Scheduler** setup, or detailed troubleshooting per platform? See the **[Running as a Service](docs/guide/06-running-as-a-service.md)** guide page.
+
+To run sortie automatically in the background on macOS, install it as a launchd user agent:
 
 ```
 make install-launchd
@@ -618,6 +657,10 @@ Cross-compile release binaries:
 ```
 make release VERSION=1.0.0
 ```
+
+## Need help?
+
+Hit a wall? The **[Troubleshooting guide](docs/guide/05-troubleshooting.md)** has decision trees for the three biggest categories (rule isn't matching, daemon won't stay up, performance) plus 15+ symptom→fix entries. If your problem isn't there, file an issue at https://github.com/msjurset/sortie/issues with the artifacts listed in the [bug-report checklist](docs/guide/05-troubleshooting.md#filing-a-useful-bug-report).
 
 ## License
 
