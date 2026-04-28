@@ -22,7 +22,7 @@ Every recipe was checked with `sortie validate` against current sortie. Run that
 - **Permissions & integrity** — [chmod](#make-scripts-executable), [checksum](#write-a-sidecar-hash-for-large-downloads)
 - **Security** — [encrypt](#auto-encrypt-outgoing-files), [decrypt](#auto-decrypt-an-inbox), [unquarantine](#unquarantine-trusted-installers-macos)
 - **Integrations** — [exec / rsync](#rsync-new-files-to-a-nas), [desktop notify](#toast-when-an-invoice-arrives), [webhook](#post-new-file-events-to-a-webhook), [upload](#upload-nightly-reports-to-s3), [Finder tag](#apply-finder-tags-to-receipts-macos), [auto-open](#auto-open-disk-images-macos)
-- **Multi-step chains** — [download triage](#download-triage), [invoice intake](#invoice-intake-with-capture-group-filing), [photo import](#photo-import-pipeline), [screenshot tidy](#screenshot-tidy), [log rotator](#log-rotator)
+- **Multi-step chains** — [download triage](#download-triage), [invoice intake](#invoice-intake-with-capture-group-filing), [photo import](#photo-import-pipeline), [screenshot tidy](#screenshot-tidy), [log rotator](#log-rotator), [searchable file cabinet](#searchable-file-cabinet)
 
 ---
 
@@ -506,7 +506,7 @@ The history record's `dest` field encodes the outcome: `moved:/path` (no duplica
 - Quality depends heavily on input: low-DPI scans and skewed pages produce poor results. Pre-process with `exec` calling `convert -deskew 40% -threshold 50%` for messy scans.
 - Sortie passes the source as the first arg and dest as the second; you can't currently inject custom tesseract flags. Use `exec` for `--psm` or `--oem` tuning.
 
-**Notes:** reversible — undo deletes the `.txt` output.
+**Notes:** reversible — undo deletes the `.txt` output. For a complete searchable-archive workflow (scan → OCR → searchable PDF or `.txt` sidecar in a date-organized cabinet), see the [Searchable file cabinet](#searchable-file-cabinet) chain below — it includes an Apple Vision variant that's noticeably more accurate than vanilla tesseract on phone-scan input.
 
 ---
 
@@ -1149,6 +1149,119 @@ The `cooldown: 1m` prevents the rule from re-firing while the log is still being
 - **Per-app retention:** split into multiple rules with different `min_size` thresholds for different apps' logs.
 
 **Notes:** the chain is mostly reversible — undo can restore the original log from the trash and delete the archive copy, but it cannot delete the S3 object.
+
+---
+
+### Searchable file cabinet
+
+**When to reach for this:** you scan paper documents (mail, receipts, contracts) with your phone and want a searchable archive on your computer rather than dropping the images into a folder you'll never grep through. Two flavors are shown: an **Apple Vision** variant (best quality on macOS) and a **searchable PDF** variant (one self-contained file per document, indexable by Spotlight, Preview, and most PDF viewers).
+
+**Prerequisites:**
+
+- Use a real document scanning app on your phone (iOS Notes "Scan Documents," Files app's scan, or the Google Drive app's `+` → Scan). These auto-rectify perspective, threshold to clean B&W, and produce dramatically better OCR input than casual photos. The single biggest accuracy win available is at the capture step, not at the OCR step.
+- Pick one of the OCR backends below and install it.
+
+**Choose your OCR backend:**
+
+| Backend | Install | Quality on phone scans | Where it works |
+|---------|---------|------------------------|----------------|
+| Apple Vision via `ocrit` | Download the signed `.pkg` from [ocrit releases](https://github.com/insidegui/ocrit/releases/latest), or `swift build -c release` from source | Excellent — same engine as Live Text | macOS only |
+| `tesseract` to searchable PDF | `brew install tesseract` (or apt/scoop) | Good on clean scans, mediocre on photos | macOS / Linux / Windows |
+| `ocrmypdf` | `brew install ocrmypdf` (wraps tesseract + preprocessing) | Better than raw tesseract; PDF-input only | macOS / Linux / Windows |
+
+#### Variant 1: Apple Vision → `.txt` sidecar (macOS)
+
+```yaml
+- name: scan-cabinet-vision
+  match:
+    extensions: [.jpg, .jpeg, .heic, .png]
+    glob: "Scan_*"               # adjust to your scanner's naming convention
+  cooldown: 5s                    # let cloud sync settle if the source is in iCloud / Drive
+  actions:
+    - type: exec
+      command: 'ocrit "{{.Path}}" -o "{{.Path}}.txt"'
+    - type: move
+      dest: ~/Documents/FileCabinet/{{.Year}}/{{.Month}}/{{.Name}}{{.Ext}}
+```
+
+**What happens:** `ocrit` calls Apple's Vision framework on the scan image and writes the recognized text to `<source>.txt` in the same directory. Then `move` files both the image and... wait — only the image moves. The `.txt` sidecar gets left behind in the source directory. To keep them together, swap the order:
+
+```yaml
+actions:
+  - type: move
+    dest: ~/Documents/FileCabinet/{{.Year}}/{{.Month}}/{{.Name}}{{.Ext}}
+  - type: exec
+    command: 'ocrit "{{.Dest}}" -o "{{.Dest}}.txt"'
+```
+
+After the move, `{{.Dest}}` resolves to the new location, so `ocrit` runs on the image at its archived path and writes the sidecar next to it. Final layout:
+
+```
+~/Documents/FileCabinet/2026/04/Scan_2026-04-28_Anthem-bill.heic
+~/Documents/FileCabinet/2026/04/Scan_2026-04-28_Anthem-bill.heic.txt
+```
+
+Spotlight indexes the `.txt` automatically; searching for "anthem" in Finder will surface both files.
+
+#### Variant 2: tesseract → searchable PDF (cross-platform)
+
+A searchable PDF is a single file containing the original image as the visual layer plus an invisible text layer for search. Self-contained, portable, indexable.
+
+```yaml
+- name: scan-cabinet-pdf
+  match:
+    extensions: [.jpg, .jpeg, .png]
+    glob: "Scan_*"
+  cooldown: 5s
+  actions:
+    - type: exec
+      command: 'tesseract "{{.Path}}" "{{.Path}}.searchable" pdf'
+    - type: move
+      dest: ~/Documents/FileCabinet/{{.Year}}/{{.Month}}/{{.Name}}.pdf
+```
+
+The first step produces `<source>.searchable.pdf` (tesseract appends `.pdf` automatically). The second step moves it into the dated cabinet, dropping the `.searchable` infix in the dest. After both steps, the original image and the searchable PDF coexist — adjust as you prefer (delete the original after, or keep it as backup).
+
+#### Variant 3: PDF input → searchable PDF via `ocrmypdf`
+
+If your scans are already PDFs (some scanner apps export directly to PDF), `ocrmypdf` is dramatically better than raw tesseract because it handles deskew, despeckle, and orientation detection automatically:
+
+```yaml
+- name: scan-cabinet-ocrmypdf
+  match:
+    extensions: [.pdf]
+    glob: "Scan_*"
+  cooldown: 5s
+  actions:
+    - type: exec
+      command: 'ocrmypdf --skip-text --deskew "{{.Path}}" "{{.Path}}.searchable.pdf"'
+    - type: move
+      dest: ~/Documents/FileCabinet/{{.Year}}/{{.Month}}/{{.Name}}.pdf
+```
+
+`--skip-text` avoids re-OCR'ing PDFs that already have a text layer; `--deskew` is the single most useful preprocessing step for handheld scans.
+
+**Sequencing rationale:**
+
+OCR before move is fine in Variant 2/3 because the OCR step writes the output to a new file; the source is preserved. The order in Variant 1 is reversed because `ocrit` writes the `.txt` *next to* its input, so we move the input first and OCR at its destination — keeping the image and sidecar together.
+
+**Failure modes:**
+
+- **OCR step fails (tool missing, bad image):** chain stops. The original scan stays where it is. Investigate via `sortie history -n 5`.
+- **Move step fails (permissions, disk full):** the `.txt` sidecar (Variant 1) or `.searchable.pdf` (Variant 2/3) exists at the source location but the original isn't moved. Re-running the rule on the next event picks up where it left off.
+- **Apple Vision occasionally hangs on corrupt images.** `ocrit` will return an error; the move doesn't run. The history record's `error` field captures the message.
+
+**Variations:**
+
+- **Skip the `move` step and OCR in place** if you'd rather keep scans where they land (Drive folder, iCloud, etc.) and let those services handle their own sync — sortie just produces sidecars.
+- **Combine date capture with content-based filing.** Add a `content_regex` step (`(?P<vendor>...)`) on the OCR'd `.txt` to file scans by vendor as well as date. Two-pass workflow: chain 1 OCRs and writes the sidecar; chain 2 reads the sidecar's content via a separate rule with `content_regex` matching, and re-files based on captures.
+- **Multi-page PDF from a multi-photo capture.** If you take three photos for a three-page document, combine before OCR'ing: `convert page1.jpg page2.jpg page3.jpg combined.pdf` (ImageMagick) followed by `ocrmypdf` on the combined PDF.
+
+**Notes for the workflow you described (phone → Drive → file cabinet):**
+
+- Google Drive runs its own server-side OCR on every uploaded image. If your only search surface is Drive's web/app interface, you may not need any of this — Drive's search will find scanned text automatically. Sortie OCR's value is producing **local, portable, greppable, Spotlight-indexable** text.
+- If you sync Google Drive to a local folder, point the rule at the synced location (e.g. `~/Library/CloudStorage/GoogleDrive-you@example.com/My Drive/Scans/`). When sortie writes the `.txt` or `.searchable.pdf`, Drive will sync it back up — the searchable form is then available on your phone too.
+- For the cleanest archive, consider piping new scans through this chain into a **non-Drive** location (`~/Documents/FileCabinet/`). That gives you sortie's local-first archive plus Drive's online OCR — belt and suspenders.
 
 ---
 
