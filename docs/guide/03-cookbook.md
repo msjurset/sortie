@@ -1335,6 +1335,135 @@ rules:
 
 ---
 
+## Backups
+
+`~/.config/sortie/backups/` holds full-state snapshot tarballs created by `sortie backup snapshot`. Each one bundles a curated subset of your sortie home:
+
+- **`config.yaml`** — central config (rules, directories, ignore patterns)
+- **`history.json`** — dispatch history (JSON Lines, append-only)
+- **`trash/`** — files moved by the `delete` action that haven't been purged yet. Without these, restoring a snapshot can't undo recent deletes.
+
+Excluded: `logs/` (ephemeral) and `backups/` itself (recursive).
+
+**Per-directory `.sortie.yaml` files are NOT in the snapshot.** They live inside watched directories (e.g. `~/Downloads/.sortie.yaml`) and are outside the sortie home — back them up alongside their parent directories. Sortie deliberately doesn't try to enumerate watched paths and pull their dotfiles in; that would couple the backup tarball to the live filesystem state.
+
+The `sortie backup` subcommand tree manages snapshots. Restore is intentionally limited to `config.yaml` (snapshot tarballs need `tar -xzf` because they overwrite history and trash, which is too destructive for a one-liner).
+
+### Browse and restore snapshots
+
+**When to reach for this:** you remember the rules used to dispatch differently and want to compare or roll back. Or you're moving sortie to a new machine.
+
+**How:**
+
+```sh
+# List all snapshots, newest first
+sortie backup list
+
+# See what's inside the newest snapshot
+sortie backup show
+
+# See the diff between the newest snapshot's config and your live one
+sortie backup diff
+
+# Restore config.yaml from the newest snapshot
+# (your current config is auto-saved alongside the snapshots first)
+sortie backup restore
+
+# To recover history.json or trash/ from a snapshot, expand manually:
+tar -xzf ~/.config/sortie/backups/sortie-2026-04-30T080000.tar.gz -C ~/.config/sortie/
+```
+
+**Variations:**
+
+- **`--at <prefix>`:** match a specific timestamp. Prefix-matched, newest hit wins. Examples: `--at 2026-04-29` (any time on that day), `--at 2026-04-29T08` (the 8 AM hour), `--at 2026-04-29T083014` (exact). Applies to `show`, `restore`, and `diff`.
+- **Pipe `show` to a pager:** `sortie backup show | less`.
+
+**Gotchas:**
+
+- **Restore only handles `config.yaml`.** If you need to recover history.json or trash/, the `tar -xzf` line above expands the whole snapshot in place. `config.yaml` becomes the live config (and the pre-restore version is saved as `config-<ts>.yaml` next to the snapshots).
+- **The pre-restore copy isn't auto-pruned.** Each restore leaves one `config-<ts>.yaml` behind in `~/.config/sortie/backups/`. They're harmless but accumulate; clean them up by hand if needed (the `prune` command targets `sortie-*.tar.gz` only, so it won't touch them).
+
+---
+
+### Scheduled snapshot via goback
+
+**When to reach for this:** you want recurring full-state backups of your sortie state sent to your normal backup pipeline alongside other apps.
+
+**How:**
+
+```sh
+# Manually, to test
+sortie backup snapshot
+# → Creates ~/.config/sortie/backups/sortie-<ISO timestamp>.tar.gz
+```
+
+The output path is exactly what goback's `local` job format expects. Add this entry to `~/.config/goback/config.yaml`:
+
+```yaml
+- name: sortie
+  type: local
+  schedule: "0 9 * * 0"    # Sunday 9:00 AM
+  folder: sortie
+  filename: "sortie_{2006-01-02}.tar.gz"
+  pre_command: "~/.local/bin/sortie backup snapshot"
+  local_pattern: "~/.config/sortie/backups/sortie-*.tar.gz"
+  post_command: "rm -f ~/.config/sortie/backups/sortie-*.tar.gz"
+  retention: 4
+```
+
+**What goback does each Sunday:**
+
+1. Runs `sortie backup snapshot` — writes the tarball to the staging path.
+2. Picks up files matching `local_pattern` and copies them into `~/backups/sortie/sortie_<date>.tar.gz`.
+3. Runs `post_command` to clean up the staging file (so the dir doesn't grow without bound).
+4. Enforces `retention: 4` on the destination — the four most recent archives are kept; older ones pruned.
+
+**Variations:**
+
+- **More frequent:** `schedule: "0 9 * * *"` for daily.
+- **Different retention:** any integer.
+
+**Gotchas:**
+
+- **The staging file must be cleaned up** by `post_command`, otherwise `~/.config/sortie/backups/` grows monotonically. The `rm -f` glob targets only the snapshot prefix, so it won't touch unrelated files in the backups dir.
+- **Use the absolute path `~/.local/bin/sortie`** in `pre_command`. Goback's invocation context doesn't include the user's interactive PATH.
+
+---
+
+### Prune old snapshots
+
+**When to reach for this:** the backups directory has accumulated more than you want and you want to thin it manually (rather than relying on goback's `retention`).
+
+**How:**
+
+```sh
+# Default: keep the newest 10
+sortie backup prune
+
+# Show what would happen without deleting
+sortie backup prune --dry-run
+
+# Keep only 5
+sortie backup prune --keep 5
+
+# Delete anything older than 30 days, regardless of count
+sortie backup prune --keep 0 --older-than 30d
+
+# Both rules at once
+sortie backup prune --keep 10 --older-than 90d
+```
+
+**What happens:** the newest `--keep N` snapshots are kept; older ones plus anything matching `--older-than DURATION` are removed. `--dry-run` prints the targeted paths without deleting them.
+
+**Variations:**
+
+- **Disable the count rule:** `--keep 0` keeps all snapshots, ignoring count (useful when paired with `--older-than` for "only age-based pruning").
+- **Days vs. hours:** `--older-than 7d` is shorthand for `168h`. `30d`, `2h30m`, `1h` all parse.
+
+**Notes:** `prune` only targets the `sortie-*.tar.gz` snapshot pattern. Pre-restore `config-<ts>.yaml` files left behind by `backup restore` are not deleted by this command — clean those up manually if they accumulate.
+
+---
+
 ## Where to go next
 
 - [Reference](04-reference.md) — quick-lookup tables for flags, match conditions, actions, and template variables.

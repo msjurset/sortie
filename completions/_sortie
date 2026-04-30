@@ -13,6 +13,7 @@ _sortie() {
         'trash:Manage the trash directory'
         'actions:List available action types'
         'validate:Validate rules for errors and potential problems'
+        'backup:Manage sortie state snapshots'
         'man:Display the manual page'
         'help:Help about any command'
         'completion:Generate the autocompletion script for the specified shell'
@@ -129,6 +130,45 @@ _sortie() {
                 '(- *)--help[Show help]' \
                 '--global[Include global rules]' \
                 '*:directory:_directories'
+            ;;
+        backup)
+            local -a backup_commands
+            backup_commands=(
+                'list:List snapshot tarballs, newest first'
+                'show:Print the file listing of a snapshot'
+                'restore:Restore config.yaml from a snapshot'
+                'diff:Diff config.yaml in a snapshot vs current'
+                'prune:Delete old snapshots by count and/or age'
+                'snapshot:Create a new state snapshot tarball'
+            )
+            _arguments -C \
+                '(- *)--help[Show help]' \
+                '1: :->subcmd' \
+                '*:: :->subargs'
+            case $state in
+            subcmd)
+                _describe 'backup command' backup_commands
+                ;;
+            subargs)
+                case $words[1] in
+                show|restore|diff)
+                    _arguments \
+                        '(- *)--help[Show help]' \
+                        '--at=[Match a specific timestamp prefix]:prefix:'
+                    ;;
+                prune)
+                    _arguments \
+                        '(- *)--help[Show help]' \
+                        '--keep=[Max snapshots to keep]:n:' \
+                        '--older-than=[Delete older than DURATION]:duration:' \
+                        '--dry-run[Print without deleting]'
+                    ;;
+                *)
+                    _arguments '(- *)--help[Show help]'
+                    ;;
+                esac
+                ;;
+            esac
             ;;
         status)
             _arguments \

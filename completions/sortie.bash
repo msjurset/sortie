@@ -2,7 +2,7 @@ _sortie() {
     local cur prev words cword
     _init_completion || return
 
-    local commands="scan watch history undo rules config status trash validate actions man help completion"
+    local commands="scan watch history undo rules config status trash validate actions backup man help completion"
     local global_flags="--help --version --config --log-format --verbose -v"
 
     if [[ $cword -eq 1 ]]; then
@@ -77,9 +77,23 @@ _sortie() {
             COMPREPLY=($(compgen -W "move copy rename delete compress extract symlink chmod checksum exec notify convert resize watermark ocr encrypt decrypt upload tag open deduplicate unquarantine" -- "$cur"))
         fi
         ;;
+    backup)
+        if [[ $cword -eq 2 ]]; then
+            COMPREPLY=($(compgen -W "list show restore diff prune snapshot" -- "$cur"))
+        elif [[ "$cur" == -* ]]; then
+            case "${words[2]}" in
+            show|restore|diff)
+                COMPREPLY=($(compgen -W "--at --help" -- "$cur")) ;;
+            prune)
+                COMPREPLY=($(compgen -W "--keep --older-than --dry-run --help" -- "$cur")) ;;
+            *)
+                COMPREPLY=($(compgen -W "--help" -- "$cur")) ;;
+            esac
+        fi
+        ;;
     help)
         if [[ $cword -eq 2 ]]; then
-            local help_topics="scan watch history undo rules config status trash actions validate man move copy rename delete compress extract symlink chmod checksum exec notify convert resize watermark ocr encrypt decrypt upload tag open deduplicate unquarantine"
+            local help_topics="scan watch history undo rules config status trash actions validate backup man move copy rename delete compress extract symlink chmod checksum exec notify convert resize watermark ocr encrypt decrypt upload tag open deduplicate unquarantine"
             COMPREPLY=($(compgen -W "$help_topics" -- "$cur"))
         fi
         ;;

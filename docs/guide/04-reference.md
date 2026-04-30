@@ -21,6 +21,12 @@ Quick-lookup tables. For exhaustive flag documentation, use `sortie <subcommand>
 | `sortie undo [id]` | Reverse one or more recorded actions |
 | `sortie trash` | Show trashed files |
 | `sortie trash purge` | Empty the trash directory |
+| `sortie backup snapshot` | Create `~/.config/sortie/backups/sortie-<ts>.tar.gz` (config + history + trash) |
+| `sortie backup list` | List snapshot tarballs, newest first |
+| `sortie backup show` | Print the file listing of a snapshot |
+| `sortie backup restore` | Restore `config.yaml` from a snapshot (other items need manual `tar -xzf`) |
+| `sortie backup diff` | Diff `config.yaml` in a snapshot vs the current config |
+| `sortie backup prune` | Delete old snapshots by `--keep N` and/or `--older-than DURATION` |
 | `sortie man` | Print the roff-formatted man page to stdout |
 
 ## Global flags
@@ -48,6 +54,10 @@ Only the ones you're likely to reach for. See `sortie <cmd> --help` for the rest
 | `watch` | `--debounce <dur>` | `500ms` | Coalesce rapid events on the same path |
 | `history` | `-n`, `--limit <int>` | `20` | Max records to print |
 | `undo` | `--last <int>` | `1` | Reverse the N most recent actions |
+| `backup show`, `restore`, `diff` | `--at <prefix>` | (newest) | Match a specific timestamp prefix (e.g. `2026-04-30`) |
+| `backup prune` | `--keep <int>` | `10` | Keep newest N snapshots; `0` disables this rule |
+| `backup prune` | `--older-than <dur>` | (none) | Delete older than DURATION (`7d`, `30d`, `24h`) |
+| `backup prune` | `--dry-run` | `false` | Print what would be deleted |
 
 ## Match conditions
 

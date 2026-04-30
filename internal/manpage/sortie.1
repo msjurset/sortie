@@ -98,6 +98,44 @@ List all available action types. With a name argument, show detailed
 documentation for that specific action type including required and optional
 fields.
 .TP
+.B backup list
+List snapshot tarballs in \fB~/.config/sortie/backups/\fR, newest first.
+Snapshots are named \fIsortie\-<ISO timestamp>.tar.gz\fR and contain the
+central config, dispatch history, and pending trash.
+.TP
+.B backup show \fB[\-\-at\fR \fI<ts-prefix>\fR\fB]\fR
+Print the file listing of a snapshot tarball (one path per line).
+\fB\-\-at\fR matches a specific timestamp prefix (e.g. \fB2026-04-30\fR or
+\fB2026-04-30T08\fR); the newest match wins. Without \fB\-\-at\fR, shows
+the newest snapshot.
+.TP
+.B backup restore \fB[\-\-at\fR \fI<ts-prefix>\fR\fB]\fR
+Extract \fIconfig.yaml\fR from a snapshot tarball and overwrite the live
+config. Before overwriting, the current config is saved alongside the
+snapshots as \fIconfig\-<ISO timestamp>.yaml\fR so the restore is itself
+reversible. Other items in the snapshot (history.json, trash/) are not
+auto-restored \(em expand them manually with
+\fBtar -xzf <snapshot> -C ~/.config/sortie/\fR.
+.TP
+.B backup diff \fB[\-\-at\fR \fI<ts-prefix>\fR\fB]\fR
+Show a unified diff between the \fIconfig.yaml\fR inside a snapshot and
+the live config.
+.TP
+.B backup prune \fB[\-\-keep\fR \fIN\fR\fB] [\-\-older\-than\fR \fIDURATION\fR\fB] [\-\-dry\-run]\fR
+Delete old snapshots. \fB\-\-keep\fR keeps the newest \fIN\fR (default 10;
+pass 0 to disable). \fB\-\-older\-than\fR accepts standard durations plus
+\fIN\fR\fBd\fR for days (e.g. \fB7d\fR, \fB30d\fR, \fB24h\fR). \fB\-\-dry\-run\fR
+previews without deleting.
+.TP
+.B backup snapshot
+Create a tarball at \fB~/.config/sortie/backups/sortie\-<timestamp>.tar.gz\fR
+containing \fBconfig.yaml\fR, \fBhistory.json\fR, and \fBtrash/\fR from
+\fB~/.config/sortie/\fR. Logs and the backups directory itself are
+excluded. Per-directory \fI.sortie.yaml\fR files inside watched directories
+are also excluded \(em they live alongside their parent directories and
+are the user's responsibility to back up separately. Designed to be
+invoked by a goback \fBlocal\fR job for scheduled backups.
+.TP
 .B man
 Display this manual page.
 .SH OPTIONS

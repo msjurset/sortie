@@ -95,6 +95,12 @@ sortie [command] [flags]
 | `trash purge` | Permanently delete all trashed files |
 | `actions [name]` | List action types, or show details for a specific action |
 | `validate [directory...]` | Check rules for errors and potential problems |
+| `backup snapshot` | Create a state tarball at `~/.config/sortie/backups/sortie-<ts>.tar.gz` |
+| `backup list` | List snapshot tarballs, newest first |
+| `backup show` | Print the file listing of a snapshot |
+| `backup restore` | Restore `config.yaml` from a snapshot (other items need manual `tar -xzf`) |
+| `backup diff` | Diff `config.yaml` in a snapshot vs the current config |
+| `backup prune` | Delete old snapshots by `--keep N` and/or `--older-than DURATION` |
 | `man` | Display manual page |
 
 ### Global Flags
