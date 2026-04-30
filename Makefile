@@ -124,6 +124,21 @@ release: release-tag clean generate release-checks
 	rm dist/sortie.1
 	@echo "==> Release artifacts in dist/ for $(VERSION):"
 	@ls -1 dist/
+	@echo "==> Pushing main and $(VERSION) to origin..."
+	@git push origin main
+	@git push origin "$(VERSION)"
+	@echo "==> Creating GitHub release..."
+	@if ! command -v gh >/dev/null 2>&1; then \
+		echo "WARN: gh CLI not installed. Tag and artifacts are pushed; create the release manually:"; \
+		echo "  gh release create $(VERSION) dist/sortie-$(VERSION)-* --generate-notes"; \
+	elif ! gh release create "$(VERSION)" dist/sortie-$(VERSION)-* --generate-notes; then \
+		echo "ERROR: gh release create failed. Tag and artifacts are pushed; rerun manually:"; \
+		echo "  gh release create $(VERSION) dist/sortie-$(VERSION)-* --generate-notes"; \
+		exit 1; \
+	fi
+	@echo "==> Redeploying local install..."
+	@$(MAKE) deploy || echo "WARN: deploy failed; run 'make deploy' manually."
+	@echo "==> Release $(VERSION) complete."
 
 deploy: build install-man install-completions
 	install -d ~/.local/bin
