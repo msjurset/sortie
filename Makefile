@@ -82,7 +82,32 @@ release-checks:
 	fi
 	@echo "==> All release checks passed for $(VERSION)."
 
-release: clean generate release-checks
+# release-tag validates VERSION and tags HEAD if not already tagged. Required
+# usage: `make release VERSION=v0.5.1`. Without VERSION, the auto-derived
+# `git describe` value falls through and fails the format check.
+release-tag:
+	@# Allow vX.Y.Z with optional pre-release suffix that starts with a letter
+	@# (e.g. v1.2.3-rc1, v1.2.3-beta.2). Reject git-describe output like
+	@# v1.2.3-5-gabc1234[-dirty] where the suffix starts with a digit.
+	@if ! echo "$(VERSION)" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z][a-zA-Z0-9._-]*)?$$'; then \
+		echo "ERROR: pass VERSION=vX.Y.Z to release. Example:"; \
+		echo "  make release VERSION=v0.5.1"; \
+		echo "(got '$(VERSION)')"; \
+		exit 1; \
+	fi
+	@if git rev-parse "$(VERSION)" >/dev/null 2>&1; then \
+		if [ "$$(git rev-parse $(VERSION)^{commit})" != "$$(git rev-parse HEAD)" ]; then \
+			echo "ERROR: tag $(VERSION) already exists at $$(git rev-parse --short $(VERSION)) but HEAD is $$(git rev-parse --short HEAD)"; \
+			echo "Either check out the tagged commit, or pick a different VERSION."; \
+			exit 1; \
+		fi; \
+		echo "==> Tag $(VERSION) already at HEAD; reusing."; \
+	else \
+		echo "==> Tagging $(VERSION) at HEAD..."; \
+		git tag -a "$(VERSION)" -m "Release $(VERSION)"; \
+	fi
+
+release: release-tag clean generate release-checks
 	@echo "==> Cross-compiling release artifacts for $(VERSION)..."
 	@mkdir -p dist
 	cp sortie.1 dist/
@@ -148,4 +173,4 @@ uninstall-launchd:
 		echo "No service installed."; \
 	fi
 
-.PHONY: generate build run test vet clean release release-checks deploy install-man install-completions install-launchd uninstall-launchd
+.PHONY: generate build run test vet clean release release-tag release-checks deploy install-man install-completions install-launchd uninstall-launchd
