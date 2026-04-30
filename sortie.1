@@ -129,12 +129,14 @@ previews without deleting.
 .TP
 .B backup snapshot
 Create a tarball at \fB~/.config/sortie/backups/sortie\-<timestamp>.tar.gz\fR
-containing \fBconfig.yaml\fR, \fBhistory.json\fR, and \fBtrash/\fR from
-\fB~/.config/sortie/\fR. Logs and the backups directory itself are
-excluded. Per-directory \fI.sortie.yaml\fR files inside watched directories
-are also excluded \(em they live alongside their parent directories and
-are the user's responsibility to back up separately. Designed to be
-invoked by a goback \fBlocal\fR job for scheduled backups.
+containing \fBconfig.yaml\fR and \fBhistory.json\fR from
+\fB~/.config/sortie/\fR. \fBtrash/\fR is excluded (transient state \(em
+recover deleted files via \fBsortie undo\fR or your filesystem-level
+backup); \fBlogs/\fR and the backups directory are also excluded.
+Per-directory \fI.sortie.yaml\fR files inside watched directories live
+alongside their parent directories and are the user's responsibility to
+back up separately. Designed to be invoked by a goback \fBlocal\fR job
+for scheduled backups.
 .TP
 .B man
 Display this manual page.

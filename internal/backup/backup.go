@@ -1,17 +1,20 @@
 // Package backup manages snapshot tarballs in ~/.config/sortie/backups/.
 //
-// One filename pattern lives there: full-state snapshots created by
+// One filename pattern lives there: snapshots created by
 // `sortie backup snapshot`, named sortie-<YYYY-MM-DDTHHmmss>.tar.gz.
-// Each snapshot bundles a curated subset of the user's sortie home:
+// Each snapshot bundles the data sortie uniquely owns:
 //
 //   - config.yaml   — central config (rules, directories, ignore patterns)
-//   - history.json  — operational history (JSON Lines, append-only)
-//   - trash/        — files the `delete` action moved to the trash dir
-//                     and that haven't been purged yet. Critical: without
-//                     this, a restored snapshot can't undo recent deletes.
+//   - history.json  — dispatch history (JSON Lines, append-only)
 //
 // Excluded:
 //
+//   - trash/        — files moved by the `delete` action. Transient state
+//                     that the user purges on their own cadence; archiving
+//                     it weekly would replicate data already covered by
+//                     whole-disk backups (Time Machine, etc.) and balloon
+//                     the snapshot. Recover trashed files via `sortie
+//                     undo` or your filesystem-level backup.
 //   - logs/         — daemon stdout/stderr, ephemeral
 //   - backups/      — would be recursive
 //
@@ -228,9 +231,10 @@ func Prune(dir string, keep int, olderThan time.Duration, dryRun bool) ([]string
 }
 
 // Snapshot creates a tarball at <outputDir>/sortie-<timestamp>.tar.gz
-// containing config.yaml, history.json, and trash/ from sortieHome.
-// Missing entries are silently skipped so the snapshot works on a fresh
-// install with no history or trash yet.
+// containing config.yaml and history.json from sortieHome. Trash, logs,
+// and the backups dir itself are deliberately excluded — see the package
+// doc comment for the rationale. Missing entries are silently skipped so
+// the snapshot works on a fresh install with no history yet.
 func Snapshot(sortieHome, outputDir string) (string, error) {
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return "", err
@@ -249,7 +253,7 @@ func Snapshot(sortieHome, outputDir string) (string, error) {
 	tw := tar.NewWriter(gz)
 	defer tw.Close()
 
-	for _, item := range []string{"config.yaml", "history.json", "trash"} {
+	for _, item := range []string{"config.yaml", "history.json"} {
 		full := filepath.Join(sortieHome, item)
 		if _, err := os.Stat(full); err != nil {
 			continue

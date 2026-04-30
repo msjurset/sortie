@@ -157,26 +157,22 @@ func TestPrune_DryRun(t *testing.T) {
 
 func TestSnapshot(t *testing.T) {
 	home := t.TempDir()
-	trashDir := filepath.Join(home, "trash")
-	if err := os.MkdirAll(trashDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
 	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte("rules: []\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(home, "history.json"), []byte(`{"id":"x"}`+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(trashDir, "deleted.txt"), []byte("trashed"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	// logs/ should NOT be in the snapshot — confirms the exclusion is enforced
-	// by way of the `for _, item := range ...` whitelist (we never add logs/).
-	if err := os.MkdirAll(filepath.Join(home, "logs"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(home, "logs", "sortie.log"), []byte("noise"), 0o644); err != nil {
-		t.Fatal(err)
+	// trash/, logs/, and backups/ are all populated to confirm they're
+	// excluded from the tarball (whitelist behavior — Snapshot only adds
+	// the items it knows about).
+	for _, sub := range []string{"trash", "logs", "backups"} {
+		if err := os.MkdirAll(filepath.Join(home, sub), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(home, sub, "junk.txt"), []byte("noise"), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	outDir := t.TempDir()
@@ -193,10 +189,8 @@ func TestSnapshot(t *testing.T) {
 
 	names := readTarballEntries(t, tarPath)
 	want := map[string]bool{
-		"config.yaml":        false,
-		"history.json":       false,
-		"trash":              false,
-		"trash/deleted.txt":  false,
+		"config.yaml":  false,
+		"history.json": false,
 	}
 	for _, n := range names {
 		if _, ok := want[n]; ok {
@@ -209,8 +203,10 @@ func TestSnapshot(t *testing.T) {
 		}
 	}
 	for _, n := range names {
-		if strings.HasPrefix(n, "logs") {
-			t.Errorf("logs/ should be excluded from snapshot, got %q", n)
+		for _, excluded := range []string{"trash", "logs", "backups"} {
+			if n == excluded || strings.HasPrefix(n, excluded+"/") {
+				t.Errorf("%s/ should be excluded from snapshot, got %q", excluded, n)
+			}
 		}
 	}
 }

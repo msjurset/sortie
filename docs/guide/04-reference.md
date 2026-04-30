@@ -21,7 +21,7 @@ Quick-lookup tables. For exhaustive flag documentation, use `sortie <subcommand>
 | `sortie undo [id]` | Reverse one or more recorded actions |
 | `sortie trash` | Show trashed files |
 | `sortie trash purge` | Empty the trash directory |
-| `sortie backup snapshot` | Create `~/.config/sortie/backups/sortie-<ts>.tar.gz` (config + history + trash) |
+| `sortie backup snapshot` | Create `~/.config/sortie/backups/sortie-<ts>.tar.gz` (config + history) |
 | `sortie backup list` | List snapshot tarballs, newest first |
 | `sortie backup show` | Print the file listing of a snapshot |
 | `sortie backup restore` | Restore `config.yaml` from a snapshot (other items need manual `tar -xzf`) |

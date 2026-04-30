@@ -1337,17 +1337,20 @@ rules:
 
 ## Backups
 
-`~/.config/sortie/backups/` holds full-state snapshot tarballs created by `sortie backup snapshot`. Each one bundles a curated subset of your sortie home:
+`~/.config/sortie/backups/` holds snapshot tarballs created by `sortie backup snapshot`. Each one bundles the data sortie uniquely owns:
 
 - **`config.yaml`** — central config (rules, directories, ignore patterns)
 - **`history.json`** — dispatch history (JSON Lines, append-only)
-- **`trash/`** — files moved by the `delete` action that haven't been purged yet. Without these, restoring a snapshot can't undo recent deletes.
 
-Excluded: `logs/` (ephemeral) and `backups/` itself (recursive).
+Excluded:
+
+- **`trash/`** — files moved by the `delete` action. Transient state that you purge on your own cadence. Recover deleted files via `sortie undo` (recent activity) or your filesystem-level backup (older state). Including trash in every weekly archive would replicate bytes already covered by Time Machine / Drive history / etc. and balloon the snapshot.
+- **`logs/`** — ephemeral
+- **`backups/`** — would be recursive
 
 **Per-directory `.sortie.yaml` files are NOT in the snapshot.** They live inside watched directories (e.g. `~/Downloads/.sortie.yaml`) and are outside the sortie home — back them up alongside their parent directories. Sortie deliberately doesn't try to enumerate watched paths and pull their dotfiles in; that would couple the backup tarball to the live filesystem state.
 
-The `sortie backup` subcommand tree manages snapshots. Restore is intentionally limited to `config.yaml` (snapshot tarballs need `tar -xzf` because they overwrite history and trash, which is too destructive for a one-liner).
+The `sortie backup` subcommand tree manages snapshots. Restore is intentionally limited to `config.yaml` (snapshot tarballs need `tar -xzf` because expanding history.json silently is too destructive for a one-liner).
 
 ### Browse and restore snapshots
 
@@ -1369,7 +1372,7 @@ sortie backup diff
 # (your current config is auto-saved alongside the snapshots first)
 sortie backup restore
 
-# To recover history.json or trash/ from a snapshot, expand manually:
+# To recover history.json from a snapshot, expand manually:
 tar -xzf ~/.config/sortie/backups/sortie-2026-04-30T080000.tar.gz -C ~/.config/sortie/
 ```
 
@@ -1380,7 +1383,7 @@ tar -xzf ~/.config/sortie/backups/sortie-2026-04-30T080000.tar.gz -C ~/.config/s
 
 **Gotchas:**
 
-- **Restore only handles `config.yaml`.** If you need to recover history.json or trash/, the `tar -xzf` line above expands the whole snapshot in place. `config.yaml` becomes the live config (and the pre-restore version is saved as `config-<ts>.yaml` next to the snapshots).
+- **Restore only handles `config.yaml`.** If you need to recover history.json, the `tar -xzf` line above expands the whole snapshot in place. `config.yaml` becomes the live config (and the pre-restore version is saved as `config-<ts>.yaml` next to the snapshots).
 - **The pre-restore copy isn't auto-pruned.** Each restore leaves one `config-<ts>.yaml` behind in `~/.config/sortie/backups/`. They're harmless but accumulate; clean them up by hand if needed (the `prune` command targets `sortie-*.tar.gz` only, so it won't touch them).
 
 ---

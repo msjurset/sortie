@@ -19,19 +19,22 @@ var backupCmd = &cobra.Command{
 	Short: "Manage sortie state snapshots",
 	Long: `Manage snapshot tarballs in ~/.config/sortie/backups/.
 
-Each snapshot bundles the central config, dispatch history, and pending
-trash files into a single tar.gz so the user's sortie state is portable
-across machines and recoverable after accidents.
+Each snapshot bundles the data sortie uniquely owns — central config and
+dispatch history — into a single tar.gz so your rules and audit log are
+portable across machines and recoverable after accidents.
 
 Snapshot contents:
   - config.yaml   — central config (rules, directories, ignore patterns)
   - history.json  — dispatch history (JSON Lines)
-  - trash/        — files moved by the 'delete' action that haven't been
-                    purged yet
 
-Snapshot does NOT include per-directory .sortie.yaml files (those live
-inside watched directories like ~/Downloads/.sortie.yaml — back them up
-alongside their parent directories) or daemon logs (logs/, ephemeral).
+Excluded:
+  - trash/        — transient state; recover deleted files via 'sortie
+                    undo' or your filesystem-level backup
+  - logs/         — daemon stdout/stderr, ephemeral
+  - backups/      — would be recursive
+  - per-directory .sortie.yaml files (those live inside watched
+    directories like ~/Downloads/.sortie.yaml — back them up alongside
+    their parent directories)
 
 The 'snapshot' command is goback-friendly: paired with a goback 'local'
 job that picks up the tarball, you get scheduled off-app backups.`,
