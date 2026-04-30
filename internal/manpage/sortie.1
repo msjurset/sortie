@@ -33,7 +33,8 @@ configurable debounce. Monitors its own binary and
 exits gracefully when a new version is deployed. Automatically reloads
 configuration files when they change, so edits to
 \fI~/.config/sortie/config.yaml\fR or any \fI.sortie.yaml\fR take effect
-without restarting. Exits cleanly on SIGINT/SIGTERM.
+without restarting \(em including additions or removals in the
+\fBdirectories:\fR list. Exits cleanly on SIGINT/SIGTERM.
 .TP
 .B history
 Show recent dispatch actions. Use \fB\-n\fR or \fB\-\-limit\fR to control output.
@@ -158,6 +159,10 @@ directories:
     recursive: false
   \- path: /var/log/myapp
     watch_existing: true
+  \- path: ~/Library/CloudStorage/GoogleDrive\-me@example.com/My Drive/Inbox
+    debounce: 10s
+    poll: 60s
+    concurrency: 2
 
 ignore:
   \- "*.DS_Store"
@@ -181,6 +186,32 @@ monitoring files that grow over time, such as log files. Combine with
 \fBmin_size\fR match conditions and per\-rule \fBcooldown\fR to dispatch when a
 file exceeds a threshold without re\-triggering on every write. Changing this
 setting requires a daemon restart. Default: \fBfalse\fR.
+.PP
+.B debounce
+overrides the global \fB\-\-debounce\fR flag for a single directory entry. Accepts
+any duration string accepted by Go's \fBtime.ParseDuration\fR (e.g., \fB500ms\fR,
+\fB10s\fR, \fB1m\fR). Useful for slow\-syncing mounts \(em a Google Drive or iCloud
+folder may not have the file fully materialized when fsnotify fires, leading to
+read errors during dispatch. Empty or omitted means inherit the global default.
+.PP
+.B poll
+runs a periodic directory walk on the given interval in addition to fsnotify
+event watching. Accepts any duration string (e.g., \fB60s\fR, \fB42m\fR). On
+cloud\-storage mounts (Google Drive, iCloud) the kernel may never receive
+fsnotify events for newly\-arrived files because the provider materializes
+listings lazily on access; \fBpoll\fR forces a directory listing every
+interval, finding files that fsnotify missed. Each tick lists the directory
+and dispatches every regular (non\-dotfile, non\-temp) file. Combine with
+\fBdebounce\fR for cloud mounts. Empty or omitted means no polling.
+.PP
+.B concurrency
+caps the number of dispatch chains that may run in parallel for files in
+this directory. Without it, every fsnotify event and poll tick spawns its
+own goroutine, so a bulk drop of 200 files would briefly run 200 concurrent
+chains \(em a problem when chains invoke heavy external tools (OCR, video
+encode). \fBconcurrency: 4\fR caps it to four; the rest queue. \fB0\fR or
+omitted preserves the unbounded behavior. Reconciles on hot\-reload \(em
+changing the value resizes the pool without a restart.
 .PP
 .B log_format
 sets the log output format globally (\fBtext\fR or \fBjson\fR). Can be

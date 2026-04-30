@@ -392,6 +392,28 @@ When a file is being downloaded or written, fsnotify fires a flood of events: a 
 
 500 ms is a sensible default. Tune up if you're processing very large files (a 5 GB ISO might still be writing 500 ms after the last logged event); tune down if you want snappier response on small files. The clock resets every time another event arrives for the same path.
 
+The `--debounce` flag sets the global default. For workflows where one directory needs different timing — most commonly a slow-syncing cloud-storage mount (Google Drive, iCloud) where the file isn't fully materialized when fsnotify fires — set a per-directory override with `debounce: 10s` on the directory entry. Omitted directories inherit the global default.
+
+### `poll` — for mounts where fsnotify is unreliable
+
+Cloud-storage providers like Google Drive's CloudStorage materialize file *listings* lazily — the directory's contents aren't actually present on the local mount until something accesses them. The kernel only emits fsnotify events for actual filesystem changes, so files dropped into a Drive folder via the web may *never* fire an event on your machine.
+
+Set `poll: 60s` (or any duration) on the directory entry to run a periodic `ReadDir` walk in addition to event watching. Each tick lists the directory and dispatches every eligible file to the same handler that fsnotify uses, with the same dotfile and partial-download exclusions. Pollers run as cancellable goroutines and reconcile on hot-reload — change the interval, and the existing poller restarts at the new cadence.
+
+Use poll *with* fsnotify, not instead of it. Local filesystems still work best with event-driven dispatch; poll is the fallback for the directories where events are unreliable.
+
+### `concurrency` — bounded dispatch for bulk drops
+
+Without a cap, sortie spawns a goroutine per fsnotify timer firing and per file found by a poll tick. For lightweight rules (move, tag) that's free. For rules that invoke heavy external tools (OCR, ffmpeg, encryption), an unbounded burst is bad: a 200-file drop briefly tries to run 200 concurrent ocrmypdf processes, and the system grinds.
+
+Set `concurrency: <N>` on the directory entry to cap parallel chains. Internally sortie spawns N worker goroutines that drain a queue; over the cap, dispatches queue and run as workers free up. Pick N based on what the rule does:
+
+- **CPU-heavy** (OCR, ffmpeg, image processing): `runtime.NumCPU()` or half of it.
+- **I/O-heavy with slow remote** (cloud uploads, network archive): something low like `2-4`.
+- **Light rules** (move, tag, notify): leave omitted; the goroutine cost is negligible.
+
+Reconciliation is hot — change the value in config and the pool resizes without a restart. Setting it back to `0` (or omitting) drops the pool and reverts to the original goroutine-per-event behavior.
+
 ### `watch_existing` — the opt-in for write events
 
 By default, `sortie watch` reacts to **Create** and **Rename** events. Writes to an already-existing file are deliberately ignored — the mental model is "sortie is for triaging *new* arrivals."
@@ -409,6 +431,8 @@ Match conditions still apply, so a growing log only dispatches once it crosses `
 ### Config hot-reload
 
 While `sortie watch` is running, save your config — `~/.config/sortie/config.yaml` or any `.sortie.yaml` in a watched directory. Within ~500 ms, the daemon picks up the change and uses the new rules for subsequent events. No restart needed.
+
+Adding or removing entries in the `directories:` list also takes effect on the running daemon — newly listed directories start receiving fsnotify events, and removed ones are detached. `watch_existing` flag changes apply too. The `sortie status` command reflects the current set so you can confirm the reload landed.
 
 If your edit produces invalid YAML, the reload fails **silently** — sortie logs the error and keeps using the previously-loaded valid config. This is deliberate: a typo in a config edit shouldn't take the whole daemon offline. Always run `sortie validate` after a non-trivial edit, and tail the daemon log to confirm the reload succeeded.
 

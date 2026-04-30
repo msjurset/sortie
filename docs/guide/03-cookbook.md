@@ -1263,6 +1263,76 @@ OCR before move is fine in Variant 2/3 because the OCR step writes the output to
 - If you sync Google Drive to a local folder, point the rule at the synced location (e.g. `~/Library/CloudStorage/GoogleDrive-you@example.com/My Drive/Scans/`). When sortie writes the `.txt` or `.searchable.pdf`, Drive will sync it back up — the searchable form is then available on your phone too.
 - For the cleanest archive, consider piping new scans through this chain into a **non-Drive** location (`~/Documents/FileCabinet/`). That gives you sortie's local-first archive plus Drive's online OCR — belt and suspenders.
 
+### Cloud-storage intake with OCR
+
+**When to reach for this:** the previous variants point a rule at a synced cloud-storage folder (Google Drive, iCloud, Dropbox), but you're hitting one or more of these symptoms:
+
+- Files dropped via the cloud provider's web UI never trigger a sortie event.
+- Dispatches fire but external tools (`ocrmypdf`, `ocrit`) crash with `Resource deadlock avoided` (errno 11, EDEADLK).
+- Sortie's own `copy` action retries but eventually fails on the same EDEADLK.
+
+These come from the cloud-storage provider's lazy materialization and FileProvider locking. The fix is a layered config: pin the folder offline, add a poll backstop, cap concurrency, and stage to local APFS before invoking external tools. Reads from the daemon over the cloud-storage FUSE mount are unreliable because the daemon's process context (launched by launchd) doesn't share the TCC permissions your terminal session has. Sortie's `copy` retries transient EDEADLKs; external tools usually don't.
+
+**Step 1 — pin the folders offline.** In Finder, right-click `raw_scans/` and `FileCabinet/` → **Make available offline**. Or globally switch Drive to **Mirror files** mode (Drive menu bar → ⚙ → Settings → Google Drive → My Drive streaming options).
+
+**Step 2 — central config for the watched directory:**
+
+```yaml
+# ~/.config/sortie/config.yaml
+directories:
+  - path: ~/Library/CloudStorage/GoogleDrive-you@example.com/My Drive/FileCabinet/raw_scans
+    poll: 60s         # backstop for fsnotify events the cloud mount swallows
+    concurrency: 4    # cap parallel OCR processes — bulk drops won't overwhelm
+```
+
+**Step 3 — per-directory `.sortie.yaml` for the rule chain:**
+
+```yaml
+# raw_scans/.sortie.yaml
+rules:
+  - name: scan-pdf-to-cabinet
+    match:
+      extensions: [.pdf]
+    actions:
+      - type: copy
+        dest: '/tmp/sortie-stage/{{.Name}}{{.Ext}}'
+      - type: exec
+        command: "/opt/homebrew/bin/ocrmypdf --rotate-pages --deskew --clean '/tmp/sortie-stage/{{.Name}}{{.Ext}}' '/Users/you/Library/CloudStorage/GoogleDrive-you@example.com/My Drive/FileCabinet/{{.Name}}{{.Ext}}'"
+      - type: exec
+        command: "/bin/rm -f '/tmp/sortie-stage/{{.Name}}{{.Ext}}'"
+      - type: move
+        dest: '/Users/you/Library/CloudStorage/GoogleDrive-you@example.com/My Drive/FileCabinet/raw_scans/processed/{{.Name}}{{.Ext}}'
+
+  - name: scan-image-to-cabinet
+    match:
+      extensions: [.jpg, .jpeg, .png, .heic, .heif, .tif, .tiff, .webp]
+    actions:
+      - type: copy
+        dest: '/tmp/sortie-stage/{{.Name}}{{.Ext}}'
+      - type: exec
+        command: "/usr/local/bin/ocrit '/tmp/sortie-stage/{{.Name}}{{.Ext}}' -o '/Users/you/Library/CloudStorage/GoogleDrive-you@example.com/My Drive/FileCabinet/'"
+      - type: exec
+        command: "/bin/mv '/tmp/sortie-stage/{{.Name}}{{.Ext}}' '/Users/you/Library/CloudStorage/GoogleDrive-you@example.com/My Drive/FileCabinet/{{.Name}}{{.Ext}}'"
+      - type: move
+        dest: '/Users/you/Library/CloudStorage/GoogleDrive-you@example.com/My Drive/FileCabinet/raw_scans/processed/{{.Name}}{{.Ext}}'
+```
+
+**Why each piece:**
+
+- **`poll: 60s`** ensures sortie picks up files even when fsnotify never sees them (the cloud provider may not dispatch FS events for newly-arrived files until something accesses the directory). The poll's `os.ReadDir` is itself the access that forces materialization.
+- **`concurrency: 4`** caps parallel OCR processes. Without it, a 200-file drop spawns 200 concurrent ocrmypdf processes; with it, the rest queue.
+- **`copy` to `/tmp/sortie-stage/`** pulls the file once with sortie's built-in EDEADLK retry. After this step, the file is on local APFS — no further FUSE reads needed.
+- **`exec ocrmypdf` reads the local stage and writes to the cloud cabinet.** Writes to cloud-storage mounts are usually fine; it's reads during sync that fail.
+- **`exec rm` (PDF) / `exec mv` (image)** cleans up the staging copy. For the image rule, `mv` doubles as both the cabinet copy and the cleanup since `ocrit` already wrote the `.txt` sidecar directly to the cabinet via `-o`.
+- **Final `move` to `processed/`** archives the source so `raw_scans/` only ever shows un-filed scans. Failed chains don't reach this step, so files retry on the next poll tick.
+
+**Absolute paths in `exec` commands matter.** launchd starts the daemon with a minimal `PATH`, so unqualified `ocrmypdf` won't resolve. Either use absolute paths (as shown) or set `PATH` in the launchd plist's `EnvironmentVariables` — see [Running as a Service](06-running-as-a-service.md#install-manually-without-make).
+
+**Variations:**
+
+- **Per-directory `debounce`** can be added if files arrive in slow trickles: `debounce: 10s` waits longer for a settled state before firing. Less needed once `Make available offline` is on.
+- **Faster concurrency**: `ocrmypdf` itself uses 4 internal worker threads, so each chain is multi-threaded. With `concurrency: 4` you get ~16 effective threads — good for an M-series Mac. Bump to 6-8 if you have headroom and want shorter wall-clock time on bulk drops; throughput plateaus past that.
+
 ---
 
 ## Where to go next

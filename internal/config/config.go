@@ -26,6 +26,24 @@ type Directory struct {
 	Path          string `yaml:"path"`
 	Recursive     bool   `yaml:"recursive"`
 	WatchExisting bool   `yaml:"watch_existing"`
+	// Debounce overrides the global --debounce flag for this directory.
+	// Useful for slow-syncing mounts (e.g. cloud-storage providers) where
+	// files may not be fully materialized when fsnotify fires. Empty means
+	// inherit the global default.
+	Debounce string `yaml:"debounce,omitempty"`
+	// Poll, when set, runs a periodic directory walk on the given interval
+	// in addition to fsnotify-based event watching. Useful for cloud-storage
+	// mounts (Google Drive, iCloud) where fsnotify events are unreliable
+	// because the provider materializes files lazily on access. Empty means
+	// no polling.
+	Poll string `yaml:"poll,omitempty"`
+	// Concurrency caps the number of dispatch chains that may run in
+	// parallel for files in this directory. Useful for directories with
+	// expensive per-file work (OCR, encoding) where unbounded parallelism
+	// would overwhelm the system on a bulk drop. 0 (default) preserves the
+	// unbounded behavior — every fsnotify and poll event spawns its own
+	// handler goroutine.
+	Concurrency int `yaml:"concurrency,omitempty"`
 }
 
 // DirConfig holds per-directory rules from a .sortie.yaml file.

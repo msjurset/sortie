@@ -21,6 +21,9 @@ This README is a feature/reference overview. The **[User Guide in `docs/guide/`]
 - **Hybrid config** — central `~/.config/sortie/config.yaml` plus per-directory `.sortie.yaml` overrides
 - **Watch mode** — real-time file monitoring with fsnotify and configurable debounce
 - **Watch existing files** — monitor existing files for changes (e.g., log growth past a size threshold) with `watch_existing: true`
+- **Per-directory debounce** — override the global `--debounce` per directory with `debounce: 10s`, useful for slow-syncing cloud-storage mounts
+- **Per-directory poll** — `poll: 60s` on a directory entry runs a periodic walk in addition to fsnotify, for cloud-storage mounts (Google Drive, iCloud) where fsnotify events fire unreliably
+- **Per-directory concurrency cap** — `concurrency: 4` bounds parallel handler invocations, preventing bulk drops from spawning hundreds of OCR/encode processes simultaneously
 - **Dry-run mode** — preview what would happen before committing
 - **Undo** — reverse recent actions from the history log
 - **Template destinations** — use `{{.Year}}`, `{{.Month}}`, `{{.Name}}`, `{{.Ext}}`, `{{.Path}}` in dest paths and action fields
@@ -28,7 +31,7 @@ This README is a feature/reference overview. The **[User Guide in `docs/guide/`]
 - **Action chaining** — run multiple actions per rule in sequence (e.g., notify then move)
 - **Ignore patterns** — `.gitignore`-style exclusions globally and per-directory
 - **Content matching** — match files by text content, regex, or byte signatures
-- **Config hot-reload** — config changes are picked up automatically in watch mode
+- **Config hot-reload** — config changes (rules, ignores, and the watched directory list) are picked up automatically in watch mode
 - **Rate limiting** — throttle dispatch throughput per scan or watch cycle
 - **Structured logging** — JSON or text log output via `--log-format`
 - **Live status** — real-time watcher status with `sortie status --watch`
@@ -199,6 +202,10 @@ directories:
     recursive: false
   - path: /var/log/myapp
     watch_existing: true    # react to writes on existing files (e.g., growing logs)
+  - path: ~/Library/CloudStorage/GoogleDrive-me@example.com/My Drive/Inbox
+    debounce: 10s           # override --debounce for this dir (e.g., slow cloud-sync mounts)
+    poll: 60s               # also walk the dir every 60s — fsnotify is unreliable on cloud mounts
+    concurrency: 2          # cap parallel dispatches; protects against bulk-drop OCR storms
 
 rules:
   - name: images-to-photos
@@ -616,7 +623,7 @@ This creates a plist at `~/Library/LaunchAgents/com.msjurset.sortie.plist` that 
 
 The watch command monitors its own binary for changes — after running `make deploy`, the daemon detects the new binary, exits gracefully, and launchd's `KeepAlive` automatically relaunches with the updated version. No manual restart needed for binary updates.
 
-Config changes are picked up automatically in watch mode — sortie detects modifications to `config.yaml` and per-directory `.sortie.yaml` files and reloads rules without restarting.
+Config changes are picked up automatically in watch mode — sortie detects modifications to `config.yaml` and per-directory `.sortie.yaml` files and reloads rules, ignore patterns, and the watched directory list without restarting.
 
 ### Managing the service
 

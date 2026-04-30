@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -44,13 +45,12 @@ func runWatch(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no directories configured to watch")
 	}
 
-	var dirs []watcher.DirOption
+	dirs, err := dirOptionsFromConfig(cfg)
+	if err != nil {
+		return err
+	}
 	var dirPaths []string
 	for _, d := range cfg.Directories {
-		dirs = append(dirs, watcher.DirOption{
-			Path:          d.Path,
-			WatchExisting: d.WatchExisting,
-		})
 		dirPaths = append(dirPaths, d.Path)
 	}
 
@@ -83,13 +83,34 @@ func runWatch(cmd *cobra.Command, args []string) error {
 
 	// Start config hot-reload watcher
 	cfgReloader := config.NewReloader(cfg, configPath(), logger)
+	cfgReloader.SetOnReload(func(newCfg *config.Config) {
+		nextDirs, err := dirOptionsFromConfig(newCfg)
+		if err != nil {
+			logger.Error("config reload: invalid directory options", "err", err)
+			return
+		}
+		w.SetDirs(nextDirs)
+	})
 	go cfgReloader.Watch(ctx, dirPaths)
 
 	fmt.Printf("Watching %d directory(ies)...\n", len(dirs))
 	for _, d := range dirs {
-		suffix := ""
+		var attrs []string
 		if d.WatchExisting {
-			suffix = " (watch_existing)"
+			attrs = append(attrs, "watch_existing")
+		}
+		if d.Debounce > 0 {
+			attrs = append(attrs, fmt.Sprintf("debounce=%s", d.Debounce))
+		}
+		if d.Poll > 0 {
+			attrs = append(attrs, fmt.Sprintf("poll=%s", d.Poll))
+		}
+		if d.Concurrency > 0 {
+			attrs = append(attrs, fmt.Sprintf("concurrency=%d", d.Concurrency))
+		}
+		suffix := ""
+		if len(attrs) > 0 {
+			suffix = " (" + strings.Join(attrs, ", ") + ")"
 		}
 		fmt.Printf("  %s%s\n", d.Path, suffix)
 	}
@@ -165,6 +186,39 @@ func runWatch(cmd *cobra.Command, args []string) error {
 			)
 		}
 	})
+}
+
+// dirOptionsFromConfig builds watcher.DirOption entries from the config.
+// Per-directory debounce strings are parsed; an invalid one is a hard error
+// so misconfigurations surface immediately rather than silently falling back.
+func dirOptionsFromConfig(cfg *config.Config) ([]watcher.DirOption, error) {
+	out := make([]watcher.DirOption, 0, len(cfg.Directories))
+	for _, d := range cfg.Directories {
+		opt := watcher.DirOption{
+			Path:          d.Path,
+			WatchExisting: d.WatchExisting,
+		}
+		if d.Debounce != "" {
+			parsed, err := time.ParseDuration(d.Debounce)
+			if err != nil {
+				return nil, fmt.Errorf("invalid debounce %q on directory %s: %w", d.Debounce, d.Path, err)
+			}
+			opt.Debounce = parsed
+		}
+		if d.Poll != "" {
+			parsed, err := time.ParseDuration(d.Poll)
+			if err != nil {
+				return nil, fmt.Errorf("invalid poll %q on directory %s: %w", d.Poll, d.Path, err)
+			}
+			opt.Poll = parsed
+		}
+		if d.Concurrency < 0 {
+			return nil, fmt.Errorf("invalid concurrency %d on directory %s: must be >= 0", d.Concurrency, d.Path)
+		}
+		opt.Concurrency = d.Concurrency
+		out = append(out, opt)
+	}
+	return out, nil
 }
 
 // monitorBinary polls the running binary's modification time and cancels the

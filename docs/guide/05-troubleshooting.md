@@ -167,10 +167,10 @@ flowchart TD
     Action -->|exec / upload| Tool[The external tool is slow,<br/>not sortie. Add cooldown<br/>or rate-limit]
     Action -->|move / copy| Net[Cross-volume moves fall back<br/>to copy+delete. Use a local<br/>destination if possible]
     
-    Many --> Debounce[Default debounce is 500ms.<br/>If files arrive faster,<br/>queue grows]
-    Debounce --> RL{Have you set<br/>--rate-limit or<br/>per-rule cooldown?}
-    RL -->|yes| Tune[Tune both — too aggressive<br/>creates the queue itself]
-    RL -->|no| Add[For high-volume sources,<br/>add cooldown to expensive<br/>rules to prevent thundering<br/>herd]
+    Many --> Debounce[Default debounce is 500ms<br/>(or per-directory override).<br/>If files arrive faster,<br/>queue grows]
+    Debounce --> RL{Have you set<br/>--rate-limit, per-rule cooldown,<br/>or per-directory concurrency?}
+    RL -->|yes| Tune[Tune them — too aggressive<br/>creates the queue itself;<br/>too loose causes the storm]
+    RL -->|no| Add[For high-volume sources,<br/>add concurrency: N on the<br/>directory or cooldown on<br/>expensive rules]
 ```
 
 Performance tuning is mostly about understanding **what's slow**:
@@ -178,6 +178,8 @@ Performance tuning is mostly about understanding **what's slow**:
 - **Content matching on PDFs** is the most common slow operation — `pdftotext` shells out and reads up to 10 pages per file. For a directory full of large PDFs, this is the bottleneck. Narrow with cheap conditions first (`min_size`, `extensions`) so content matching only runs on candidates.
 - **`exec` and `upload` block the dispatcher** while they run. Long-running rsync or S3 upload? Add a `cooldown:` of a few seconds so subsequent dispatches don't pile up.
 - **Cross-volume `move`** falls back to copy+delete, which is much slower than a same-volume rename. Watch for this when your watched directory is on one disk and your destinations are on another.
+- **Bulk drops launch unbounded parallel handlers** by default — without a cap, a 200-file drop briefly runs 200 concurrent OCR/encode chains. Set `concurrency: 4` (or another small number) on the directory entry to cap parallel dispatches via a worker pool. The rest queue and run as workers free up.
+- **Per-directory `debounce:`** can override the global `--debounce` flag for slow-syncing mounts where files aren't fully materialized when fsnotify fires. See [Concepts › Debounce](02-concepts.md#why-debounce-matters) for sizing guidance.
 
 ---
 
@@ -368,7 +370,7 @@ If you're seeing `cooldown` lines in the daemon log with `-v`, you've confirmed 
 
 ### Config hot-reload isn't picking up my changes
 
-**Cause:** the daemon watches both `~/.config/sortie/config.yaml` and any `.sortie.yaml` inside watched directories, with a 500 ms debounce. But if your edit leaves the YAML in an invalid state, the reload fails **silently from the daemon's perspective** — the daemon logs the error and keeps running with the previously-loaded valid rules, so service stays up.
+**Cause:** the daemon watches both `~/.config/sortie/config.yaml` and any `.sortie.yaml` inside watched directories, with a 500 ms debounce. Hot-reload covers rules, ignore patterns, and the watched-directories list itself — adding/removing a directory entry, or changing `debounce`/`poll`/`concurrency` on an existing entry, takes effect without a daemon restart. If your edit leaves the YAML in an invalid state, the reload fails **silently from the daemon's perspective** — the daemon logs the error and keeps running with the previously-loaded valid config, so service stays up.
 
 **Fix:**
 
@@ -382,7 +384,7 @@ Run that after every config edit. It catches invalid YAML, unknown action types,
 tail -f ~/.config/sortie/logs/sortie.log
 ```
 
-Save the config file. Within ~500 ms you should see either `config reloaded rules=N` (success) or `config reload failed err=...` (parse error caught silently).
+Save the config file. Within ~500 ms you should see either `config reloaded rules=N` (success) or `config reload failed err=...` (parse error caught silently). Directory-list changes also log `watcher added directory`, `watcher removed directory`, `watcher started pool`, etc. so you can confirm reconciliation landed.
 
 ### The daemon keeps restarting when I deploy
 
@@ -414,18 +416,38 @@ Save the config file. Within ~500 ms you should see either `config reloaded rule
 
 - For one-shot needs, use `sortie scan` periodically (cron / launchd `StartInterval` / systemd timer) instead of `watch`.
 - For continuous monitoring, run sortie on the host that owns the storage rather than the host that mounts it.
-- If neither works, set up a poll-based fallback with a tiny `exec` rule: a script that periodically lists the directory and writes a marker file, which sortie can react to via `watch_existing: true` on the marker.
+- Use the per-directory `poll: 60s` (or any duration) on the watched directory entry. Sortie will run a periodic `ReadDir` walk in addition to fsnotify, dispatching every regular file it finds. This is the canonical fix for cloud-storage providers (next entry).
+
+### Files dropped into Google Drive / iCloud / Dropbox aren't dispatched
+
+**Symptoms:**
+
+- A file lands in a watched cloud-storage folder, but sortie never logs an event for it.
+- `ls` from terminal shows the file, but the daemon ignored it.
+- Sometimes the file only "appears" to other tools after you `ls` the directory yourself, suggesting lazy materialization.
+- When dispatch *does* fire, you see `resource deadlock avoided` (errno 11, EDEADLK) errors during read or copy.
+
+**Cause:** macOS cloud-storage providers (Google Drive's CloudStorage, iCloud Drive, Dropbox via FileProvider) materialize files **lazily**. The bytes — and sometimes even the directory listing — aren't physically present on the local mount until something accesses them. Since fsnotify only fires on actual filesystem changes, the kernel may never receive a Create event for a file that hasn't been pulled down yet. Even when the file *is* present, daemon-spawned read attempts can hit EDEADLK because the provider holds a transient lock during sync.
+
+**Fix:** combine three things on the directory entry:
+
+1. **Pin the folder offline in the provider's desktop app.** For Google Drive: right-click the folder in Finder → **Make available offline** (or change the global setting to **Mirror files** for the entire Drive). This forces the provider to keep the bytes locally and dispatch real filesystem events on changes.
+2. **Add `poll: 60s` on the directory entry** as a backstop. The poll's `ReadDir` walk catches anything fsnotify still misses.
+3. **Stage to local in your rule chain.** When invoking external tools (`ocrmypdf`, `ffmpeg`, etc.) on cloud-mounted files, copy them to `/tmp/` first via sortie's `copy` action (which has built-in EDEADLK retry), run the tool against the local copy, and write the output back to the cloud folder. Daemon-spawned reads via Go's `io.Copy` fail less often than reads from external tools because sortie can retry; external tools usually can't.
+
+See the [cloud-storage intake recipe](03-cookbook.md#cloud-storage-intake-with-ocr) for a complete worked example.
 
 ### Watch is consuming too much CPU
 
-**Cause:** typically not sortie itself but an action that fires very frequently. The dispatcher itself is lightweight; expensive actions (content matching on big files, OCR, video transcoding) accumulate.
+**Cause:** typically not sortie itself but an action that fires very frequently. The dispatcher itself is lightweight; expensive actions (content matching on big files, OCR, video transcoding) accumulate. By default sortie spawns a fresh goroutine for every fsnotify-debounced event and every poll-tick file, so a bulk drop of N files briefly runs N parallel dispatch chains.
 
 **Fix:**
 
 1. Identify the busy rule. `sortie history -n 200` shows recent dispatches; counts by rule via `jq -r .rule ~/.config/sortie/history.json | sort | uniq -c | sort -rn`.
-2. Add a `cooldown:` to the noisy rule.
-3. Narrow its match conditions (cheap filters first — `extensions`, `min_size`, `glob` — before content matching).
-4. If the noise is thumb-spamming events on temp files, check whether your editor or build system is producing many Create events. Add the offending suffix to a per-directory `.sortie.yaml` ignore pattern, or use a tighter `glob:` to filter.
+2. **Cap parallel dispatches with `concurrency: N` on the directory entry.** This is usually the highest-leverage fix for OCR/encode/upload workflows that hit a bulk drop. Sortie creates a worker pool of N goroutines for the directory; over the cap, dispatches queue and run as workers free up. Reconciles on hot-reload — change the value and the pool resizes without a restart.
+3. Add a `cooldown:` to the noisy rule.
+4. Narrow its match conditions (cheap filters first — `extensions`, `min_size`, `glob` — before content matching).
+5. If the noise is thumb-spamming events on temp files, check whether your editor or build system is producing many Create events. Add the offending suffix to a per-directory `.sortie.yaml` ignore pattern, or use a tighter `glob:` to filter.
 
 ### Inotify watch limit exceeded (Linux)
 

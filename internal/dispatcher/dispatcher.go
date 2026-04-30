@@ -4,11 +4,13 @@ import (
 	"compress/gzip"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/msjurset/sortie/internal/history"
@@ -256,11 +258,36 @@ func (d *Dispatcher) Undo(rec history.Record) error {
 	}
 }
 
+// copyBackoff defines the wait between copy retries on transient errors.
+// Exposed as a var so tests can shorten it.
+var copyBackoff = []time.Duration{
+	250 * time.Millisecond,
+	500 * time.Millisecond,
+	1 * time.Second,
+}
+
 func doCopy(src, dest string) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return fmt.Errorf("creating directory: %w", err)
 	}
 
+	var err error
+	for attempt := 0; attempt <= len(copyBackoff); attempt++ {
+		if attempt > 0 {
+			time.Sleep(copyBackoff[attempt-1])
+		}
+		err = copyOnce(src, dest)
+		if err == nil {
+			return nil
+		}
+		if !isTransientFSError(err) {
+			return err
+		}
+	}
+	return fmt.Errorf("after %d retries: %w", len(copyBackoff), err)
+}
+
+func copyOnce(src, dest string) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return fmt.Errorf("opening source: %w", err)
@@ -272,16 +299,34 @@ func doCopy(src, dest string) error {
 		return fmt.Errorf("stat source: %w", err)
 	}
 
-	out, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode())
+	out, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode().Perm())
 	if err != nil {
 		return fmt.Errorf("creating destination: %w", err)
 	}
-	defer out.Close()
 
 	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		os.Remove(dest)
 		return fmt.Errorf("copying data: %w", err)
 	}
+	if err := out.Close(); err != nil {
+		os.Remove(dest)
+		return fmt.Errorf("closing destination: %w", err)
+	}
 	return nil
+}
+
+// isTransientFSError reports whether err is a filesystem error that's worth
+// retrying. EDEADLK from cloud-storage FUSE providers (Google Drive's
+// CloudStorage in particular) is the canonical case: the kernel returns it
+// when a circular dependency was avoided, and the operation is expected to
+// succeed if retried after the provider releases its lock.
+func isTransientFSError(err error) bool {
+	var errno syscall.Errno
+	if errors.As(err, &errno) {
+		return errno == syscall.EDEADLK
+	}
+	return false
 }
 
 func doRename(src, dest string) error {

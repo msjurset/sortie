@@ -1,9 +1,11 @@
 package dispatcher
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/msjurset/sortie/internal/history"
@@ -98,6 +100,45 @@ func TestDispatchCopy(t *testing.T) {
 	}
 	if string(data) != "hello world" {
 		t.Errorf("dest content = %q, want %q", string(data), "hello world")
+	}
+}
+
+func TestIsTransientFSError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"plain string error", fmt.Errorf("read failed"), false},
+		{"raw EDEADLK", syscall.EDEADLK, true},
+		{"wrapped EDEADLK", fmt.Errorf("io: %w", syscall.EDEADLK), true},
+		{"PathError EDEADLK", &os.PathError{Op: "read", Path: "/x", Err: syscall.EDEADLK}, true},
+		{"deeply wrapped EDEADLK", fmt.Errorf("outer: %w", &os.PathError{Op: "read", Err: syscall.EDEADLK}), true},
+		{"different errno (EACCES)", syscall.EACCES, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isTransientFSError(tt.err); got != tt.want {
+				t.Errorf("isTransientFSError(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDoCopyRemovesPartialDestOnError(t *testing.T) {
+	// Pass a directory as source: os.Open succeeds but io.Copy fails reading
+	// from it, exercising the partial-dest cleanup path.
+	srcDir := t.TempDir()
+	destDir := t.TempDir()
+	dest := filepath.Join(destDir, "out.bin")
+
+	if err := doCopy(srcDir, dest); err == nil {
+		t.Fatal("expected doCopy to fail when source is a directory")
+	}
+
+	if _, err := os.Stat(dest); !os.IsNotExist(err) {
+		t.Errorf("expected dest to be removed after copy failure, stat err = %v", err)
 	}
 }
 

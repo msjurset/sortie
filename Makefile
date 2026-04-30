@@ -36,7 +36,8 @@ release: clean generate test
 	rm dist/sortie.1
 
 deploy: build install-man install-completions
-	cp sortie ~/.local/bin/
+	install -d ~/.local/bin
+	install -m 755 sortie ~/.local/bin/sortie
 
 install-man:
 	install -d /usr/local/share/man/man1

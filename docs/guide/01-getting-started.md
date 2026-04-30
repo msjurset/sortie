@@ -134,7 +134,7 @@ Template variables like `{{.Name}}` and `{{.Ext}}` come from the filename. The f
 
 ## 6. Watch in real time
 
-Running `scan` manually is fine, but the real power is the watch daemon: sortie monitors your directories and dispatches files as soon as they arrive (with a short debounce to let in-progress downloads finish).
+Running `scan` manually is fine, but the real power is the watch daemon: sortie monitors your directories and dispatches files as soon as they arrive (with a short debounce to let in-progress downloads finish; tunable globally via `--debounce` or per-directory via the `debounce:` field — see [Concepts › Why debounce matters](02-concepts.md#why-debounce-matters)).
 
 ```sh
 sortie watch

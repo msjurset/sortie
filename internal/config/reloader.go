@@ -13,10 +13,21 @@ import (
 // config files for changes and swaps in the new config atomically. Readers get
 // a consistent snapshot via Current(); in-flight operations are not interrupted.
 type Reloader struct {
-	mu      sync.RWMutex
-	cfg     *Config
-	cfgPath string
-	logger  *slog.Logger
+	mu       sync.RWMutex
+	cfg      *Config
+	cfgPath  string
+	logger   *slog.Logger
+	cbMu     sync.Mutex
+	onReload func(*Config)
+}
+
+// SetOnReload registers a callback invoked after each successful reload, with
+// the freshly-loaded config. Use this to react to config-driven state outside
+// the Reloader (for example, to update a file watcher's directory list).
+func (r *Reloader) SetOnReload(fn func(*Config)) {
+	r.cbMu.Lock()
+	defer r.cbMu.Unlock()
+	r.onReload = fn
 }
 
 // NewReloader creates a reloader initialized with the given config.
@@ -85,9 +96,16 @@ func (r *Reloader) Watch(ctx context.Context, dirPaths []string) error {
 		debounceTimer = time.AfterFunc(500*time.Millisecond, func() {
 			if err := r.Reload(); err != nil {
 				r.logger.Error("config reload failed", "err", err)
-			} else {
-				cfg := r.Current()
-				r.logger.Info("config reloaded", "rules", len(cfg.Rules))
+				return
+			}
+			cfg := r.Current()
+			r.logger.Info("config reloaded", "rules", len(cfg.Rules))
+
+			r.cbMu.Lock()
+			cb := r.onReload
+			r.cbMu.Unlock()
+			if cb != nil {
+				cb(cfg)
 			}
 		})
 	}

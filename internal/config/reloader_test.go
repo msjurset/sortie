@@ -211,6 +211,81 @@ func TestReloaderWatchDetectsChange(t *testing.T) {
 	cancel()
 }
 
+func TestReloaderOnReloadCallback(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+
+	initial := `rules:
+  - name: rule1
+    match:
+      extensions: [.txt]
+    action:
+      type: move
+      dest: /dest
+`
+	if err := os.WriteFile(cfgPath, []byte(initial), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r := NewReloader(cfg, cfgPath, testLogger())
+
+	var (
+		mu       sync.Mutex
+		gotRules int
+		gotCalls int
+	)
+	r.SetOnReload(func(c *Config) {
+		mu.Lock()
+		defer mu.Unlock()
+		gotCalls++
+		gotRules = len(c.Rules)
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go r.Watch(ctx, nil)
+
+	time.Sleep(100 * time.Millisecond)
+
+	updated := `rules:
+  - name: rule1
+    match:
+      extensions: [.txt]
+    action:
+      type: move
+      dest: /dest
+  - name: rule2
+    match:
+      extensions: [.pdf]
+    action:
+      type: copy
+      dest: /dest2
+`
+	if err := os.WriteFile(cfgPath, []byte(updated), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(800 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if gotCalls < 1 {
+		t.Errorf("expected OnReload to fire at least once, got %d", gotCalls)
+	}
+	if gotRules != 2 {
+		t.Errorf("OnReload received %d rules, want 2", gotRules)
+	}
+
+	cancel()
+}
+
 func TestIsConfigFile(t *testing.T) {
 	tests := []struct {
 		path    string

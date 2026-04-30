@@ -463,6 +463,9 @@ func TestNormalizeDate(t *testing.T) {
 		{"Jan 1, 2026", "2026-01-01"},
 		{"03/15/2026", "2026-03-15"},
 		{"3/6/2026", "2026-03-06"},
+		{"April 1 , 2026", "2026-04-01"},     // AWS quirk: extra space before comma
+		{"April  1,  2026", "2026-04-01"},    // double-space variants
+		{"  March 6, 2026  ", "2026-03-06"},  // surrounding whitespace
 		{"not a date", ""},
 		{"", ""},
 	}

@@ -141,15 +141,18 @@ These influence matching:
 - **Dotfiles** — files starting with `.` are scanned/watched but rules usually skip them via their own `glob` or `extensions` filter.
 - **macOS metadata** — `.DS_Store`, `._*` resource forks, and `__MACOSX` folders inside archives are stripped automatically by `extract`.
 
-## Debounce, rate limiting, and cooldowns
+## Debounce, rate limiting, cooldowns, and concurrency
 
 | Mechanism | Where it lives | Default | Reset on restart? |
 |-----------|----------------|---------|-------------------|
 | `--debounce` (watch) | Flag | 500 ms | n/a — per-event |
+| Per-directory `debounce:` | YAML, directory entry | inherits flag | n/a — per-event |
 | `--rate-limit` (scan/watch) | Flag | disabled | yes (in-memory) |
-| Per-rule `cooldown` | YAML `cooldown:` field | none | yes (in-memory) |
+| Per-rule `cooldown:` | YAML, rule entry | none | yes (in-memory) |
+| Per-directory `poll:` | YAML, directory entry | none | n/a |
+| Per-directory `concurrency:` | YAML, directory entry | 0 (unbounded) | n/a |
 
-Rate-limit and cooldown state is **in-memory only** — restart the daemon (`sortie watch`) to clear any rule that's been held back.
+Rate-limit and cooldown state is **in-memory only** — restart the daemon (`sortie watch`) to clear any rule that's been held back. Per-directory `debounce`, `poll`, and `concurrency` reconcile on hot-reload: changing the value in `config.yaml` resizes the relevant resource (timer delay, poll interval, worker pool) without a restart.
 
 ## Exit codes
 
@@ -205,6 +208,9 @@ directories:                           # required; list of watched directories
   - path: ~/Downloads                  # required; absolute or ~-relative path
     recursive: false                   # bool, watch subdirectories too. default false
     watch_existing: false              # bool, fire on Write events for existing files. default false
+    debounce: ""                       # duration string, override --debounce for this directory. default inherits global
+    poll: ""                           # duration string, run periodic ReadDir in addition to fsnotify. default no polling
+    concurrency: 0                     # int, cap parallel dispatches via worker pool. default 0 = unbounded
 
 rules:                                 # list of rules
   - name: example                      # required; unique identifier shown in logs/history
@@ -727,6 +733,9 @@ If you specify nothing, here's what sortie uses:
 |-------|---------|
 | `recursive` | `false` |
 | `watch_existing` | `false` |
+| `debounce` | empty (inherits the global `--debounce` flag) |
+| `poll` | empty (no polling — fsnotify only) |
+| `concurrency` | `0` (unbounded — every dispatch spawns a goroutine) |
 
 ### Rule-level
 

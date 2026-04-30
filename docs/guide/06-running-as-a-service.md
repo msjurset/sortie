@@ -65,6 +65,11 @@ If you installed sortie from a release archive and don't have the source repo, w
     <string>/Users/YOUR_USERNAME/.config/sortie/logs/sortie.log</string>
     <key>ProcessType</key>
     <string>Background</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
 </dict>
 </plist>
 ```
@@ -76,6 +81,8 @@ launchctl load ~/Library/LaunchAgents/com.msjurset.sortie.plist
 ```
 
 > **Why absolute paths?** launchd doesn't expand `~` or `$HOME` inside the plist. `StandardOutPath` and `ProgramArguments` must be absolute.
+
+> **Why the `PATH` env var?** launchd starts services with a minimal `PATH` (`/usr/bin:/bin:/usr/sbin:/sbin`) that doesn't include Homebrew's `/opt/homebrew/bin` or `/usr/local/bin`. Without this entry, any rule that runs an `exec` action invoking a Homebrew-installed tool (`ocrmypdf`, `ocrit`, `ffmpeg`, `pdftotext`, etc.) fails with `command not found` — even if the tool works fine when you run sortie from a terminal. The terminal inherits your shell's `PATH`; the daemon doesn't.
 
 ### Check status and logs
 
@@ -114,6 +121,8 @@ INFO  starting watcher version=v0.4.2 ...
 ```
 
 If you don't want the auto-restart for some reason (e.g. you're scripting a coordinated deploy), unload the agent first, deploy, then load it back.
+
+> **macOS code-signing note.** `make deploy` uses `install -m 755` rather than `cp` to write the new binary. `install` writes to a temp file then `rename(2)`s into place, giving the new bytes a fresh inode. If you replace an in-use binary in place with `cp`, macOS's code-signing cache can flag the inode mismatch and `SIGKILL` future invocations of the binary. If your home-brewed deploy script uses `cp`, switch to `install` for this reason.
 
 ### Uninstall
 

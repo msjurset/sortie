@@ -286,21 +286,32 @@ func matchContent(path string, m Match) (bool, map[string]string) {
 	return true, captures
 }
 
+// dateWhitespacePattern collapses any run of whitespace around a comma into
+// a single ", " (so "April 1 , 2026" → "April 1, 2026") and any other run
+// of whitespace into a single space. Some invoice exporters insert stray
+// spaces around punctuation; this normalization makes the parser tolerant
+// of those variants without bloating the format list.
+var dateCommaPattern = regexp.MustCompile(`\s*,\s*`)
+var dateSpacePattern = regexp.MustCompile(`\s+`)
+
 // normalizeDate attempts to parse common date formats and return YYYY-MM-DD.
 // Supported formats: YYYY-MM-DD, DD-Mon-YYYY (28-FEB-2026),
-// Month D, YYYY (March 6, 2026), MM/DD/YYYY, YYYY/MM/DD.
+// Month D, YYYY (March 6, 2026), MM/DD/YYYY, YYYY/MM/DD. Tolerates extra
+// whitespace around commas and between tokens.
 func normalizeDate(s string) string {
 	s = strings.TrimSpace(s)
+	s = dateCommaPattern.ReplaceAllString(s, ", ")
+	s = dateSpacePattern.ReplaceAllString(s, " ")
 	formats := []string{
-		"2006-01-02",          // YYYY-MM-DD
-		"02-Jan-2006",         // DD-Mon-YYYY
-		"January 2, 2006",     // Month D, YYYY
-		"January 02, 2006",    // Month DD, YYYY
-		"Jan 2, 2006",         // Mon D, YYYY
-		"Jan 02, 2006",        // Mon DD, YYYY
-		"01/02/2006",          // MM/DD/YYYY
-		"1/2/2006",            // M/D/YYYY
-		"2006/01/02",          // YYYY/MM/DD
+		"2006-01-02",       // YYYY-MM-DD
+		"02-Jan-2006",      // DD-Mon-YYYY
+		"January 2, 2006",  // Month D, YYYY
+		"January 02, 2006", // Month DD, YYYY
+		"Jan 2, 2006",      // Mon D, YYYY
+		"Jan 02, 2006",     // Mon DD, YYYY
+		"01/02/2006",       // MM/DD/YYYY
+		"1/2/2006",         // M/D/YYYY
+		"2006/01/02",       // YYYY/MM/DD
 	}
 	for _, f := range formats {
 		if t, err := time.Parse(f, s); err == nil {
