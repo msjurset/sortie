@@ -6,7 +6,11 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -752,6 +756,70 @@ func TestDispatchNotifyDesktop(t *testing.T) {
 
 	if result.Record.Action != "notify" {
 		t.Errorf("action = %q, want %q", result.Record.Action, "notify")
+	}
+}
+
+func TestDispatchNotifyWithLinkWebhook(t *testing.T) {
+	srcDir := t.TempDir()
+	disp, _ := newTestDispatcher(t)
+
+	fi := testFileInfo(t, srcDir, "screenshot.png", "fake png")
+
+	var got map[string]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &got)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	r := rule.Rule{
+		Name: "test-notify-link-webhook",
+		Action: rule.Action{
+			Type:    rule.ActionNotify,
+			Title:   "Image saved",
+			Message: srv.URL,
+			Link:    "file://{{.Path}}",
+		},
+	}
+
+	if _, err := disp.Dispatch(fi, r, nil, false); err != nil {
+		t.Fatalf("Dispatch() error: %v", err)
+	}
+
+	wantLink := "file://" + fi.Path
+	if got["link"] != wantLink {
+		t.Errorf("webhook link = %q, want %q", got["link"], wantLink)
+	}
+	if got["title"] != "Image saved" {
+		t.Errorf("webhook title = %q, want %q", got["title"], "Image saved")
+	}
+}
+
+func TestDispatchNotifyWithLinkDesktop(t *testing.T) {
+	if _, err := exec.LookPath("osascript"); err != nil {
+		if _, err := exec.LookPath("notify-send"); err != nil {
+			t.Skip("no desktop notify backend available")
+		}
+	}
+
+	srcDir := t.TempDir()
+	disp, _ := newTestDispatcher(t)
+
+	fi := testFileInfo(t, srcDir, "shot.png", "data")
+
+	r := rule.Rule{
+		Name: "test-notify-link-desktop",
+		Action: rule.Action{
+			Type:    rule.ActionNotify,
+			Title:   "Saved",
+			Message: "{{.Name}}{{.Ext}}",
+			Link:    "file://{{.Path}}",
+		},
+	}
+
+	if _, err := disp.Dispatch(fi, r, nil, false); err != nil {
+		t.Fatalf("Dispatch() error: %v", err)
 	}
 }
 

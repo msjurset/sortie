@@ -468,6 +468,19 @@ rules:
       - type: move
         dest: ~/Documents/PDFs/{{.Year}}/{{.Name}}{{.Ext}}
 
+  # Move first so {{.Path}} resolves to the new location, then notify with a
+  # clickable banner that opens the file. Requires terminal-notifier on macOS.
+  - name: image-saved
+    match:
+      extensions: [.png, .jpg, .jpeg]
+    actions:
+      - type: move
+        dest: ~/Pictures/Inbox
+      - type: notify
+        title: "Image saved"
+        message: "{{.Name}}{{.Ext}}"
+        link: "file://{{.Path}}"
+
   - name: move-chmod-tag
     match:
       extensions: [.sh]
@@ -507,6 +520,7 @@ A leading `!` negates a pattern (re-includes a previously ignored file). A leadi
 | `min_size` / `max_size` | Size threshold | `500MB`, `1GB` |
 | `min_age` / `max_age` | Age threshold | `30d`, `2h` |
 | `mime_type` | MIME type prefix | `image/`, `application/pdf` |
+| `origin` | Substring match against download origin URL | `github.com`, `example.org` |
 | `content` | Substring in file content (PDF text extracted via `pdftotext`) | `TODO` |
 | `content_regex` | Regex against file content; named groups become template vars; `date` groups auto-normalize to YYYY-MM-DD | `(?P<company>\w+).*(?P<date>\d{4}-\d{2}-\d{2})` |
 | `content_bytes` | Hex byte signature (magic bytes) | `25504446` (PDF) |
@@ -525,7 +539,7 @@ A leading `!` negates a pattern (re-includes a previously ignored file). A leadi
 | `chmod` | Change permissions | Yes | `mode` |
 | `checksum` | Write hash sidecar | Yes | `algorithm`, `dest` |
 | `exec` | Run shell command | No | `command` |
-| `notify` | Desktop notification or webhook | No | `title`, `message` |
+| `notify` | Desktop notification or webhook | No | `title`, `message`, `link` |
 | `convert` | Run external converter | Yes | `tool`, `args`, `dest` |
 | `resize` | Resize image | Yes | `width`, `height`, `percentage`, `tool`, `dest` |
 | `watermark` | Stamp image with overlay | Yes | `overlay`, `gravity`, `tool`, `dest` |
@@ -567,6 +581,7 @@ Some action types shell out to external tools. Install only the tools you need:
 | `upload` | auto-detect from URI | `brew install awscli` | `gsutil` |
 | `tag` | `xattr` | Built-in (macOS) | — |
 | `notify` | `osascript` (macOS), `notify-send` (Linux), `BurntToast` (Windows) | Built-in (macOS); `apt install libnotify-bin` (Linux); `Install-Module BurntToast` (Windows) | HTTP webhook |
+| `notify` w/ `link:` | `terminal-notifier` (macOS), `notify-send` (Linux, Pango `<a href>`), `BurntToast` (Windows, native button) | `brew install terminal-notifier` (macOS, optional — without it the banner shows but the link is ignored with a one-time warning) | — |
 | `extract` | Go stdlib | Built-in | `tar` for .tar.xz only |
 | `open` | `open` | Built-in (macOS) | — |
 | `content`/`content_regex` (PDF) | `pdftotext` | `brew install poppler` | — |
@@ -613,7 +628,7 @@ sortie builds and runs on macOS, Linux, and Windows. The watcher itself (`sortie
 - `tag` — uses macOS Finder tags via `xattr`
 - `unquarantine` — macOS-specific extended attribute (no-op on Linux/Windows)
 
-`notify` and `exec` work on all platforms: `exec` runs commands through `sh` on Unix and `cmd.exe` on Windows; `notify` uses `osascript` (macOS), `notify-send` (Linux), and `BurntToast` on Windows with a stderr fallback.
+`notify` and `exec` work on all platforms: `exec` runs commands through `sh` on Unix and `cmd.exe` on Windows; `notify` uses `osascript` (macOS), `notify-send` (Linux), and `BurntToast` on Windows with a stderr fallback. Setting `link:` on a `notify` action makes the banner clickable: on Linux the message becomes a Pango `<a href>` link and on Windows BurntToast adds an "Open" button. On macOS, the click target needs `terminal-notifier` (`brew install terminal-notifier`); without it the banner still appears but the link is ignored and a one-time warning is logged.
 
 ## Running as a Service (macOS)
 

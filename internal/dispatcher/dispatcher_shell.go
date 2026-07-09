@@ -46,23 +46,31 @@ func doNotify(fi rule.FileInfo, action rule.Action, captures map[string]string) 
 		return fmt.Errorf("expanding message template: %w", err)
 	}
 
+	link, err := rule.ExpandString(action.Link, fi, captures)
+	if err != nil {
+		return fmt.Errorf("expanding link template: %w", err)
+	}
+
 	if title == "" {
 		title = "sortie"
 	}
 
 	if strings.HasPrefix(message, "http://") || strings.HasPrefix(message, "https://") {
-		return notifyWebhook(message, title, fi)
+		return notifyWebhook(message, title, link, fi)
 	}
 
-	return notifyDesktop(title, message)
+	return notifyDesktop(title, message, link)
 }
 
-func notifyWebhook(url, title string, fi rule.FileInfo) error {
+func notifyWebhook(url, title, link string, fi rule.FileInfo) error {
 	payload := map[string]string{
 		"title": title,
 		"file":  fi.Info.Name(),
 		"path":  fi.Path,
 		"size":  fmt.Sprintf("%d", fi.Info.Size()),
+	}
+	if link != "" {
+		payload["link"] = link
 	}
 
 	body, err := json.Marshal(payload)

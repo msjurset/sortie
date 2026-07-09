@@ -160,21 +160,25 @@ var registry = map[string]ActionHelp{
 	},
 	"notify": {
 		Name:        "notify",
-		Description: "Send a desktop notification (macOS) or HTTP webhook. On macOS, uses osascript. If the message starts with http:// or https://, sends an HTTP POST with file metadata as JSON.",
+		Description: "Send a desktop notification or HTTP webhook. Uses osascript (macOS), notify-send (Linux), or BurntToast (Windows). If the message starts with http:// or https://, sends an HTTP POST with file metadata as JSON.",
 		Undoable:    false,
 		Optional: []FieldHelp{
 			{Name: "title", Description: "Notification title (template-expanded, default: \"sortie\")"},
 			{Name: "message", Description: "Notification body or webhook URL (template-expanded)"},
+			{Name: "link", Description: "Clickable URL or file:// path (template-expanded). On macOS requires terminal-notifier; without it the link is dropped with a one-time warning. On Linux uses Pango <a href> markup. On Windows adds a BurntToast Open button."},
 		},
-		Example: `- name: pdf-alert
+		Example: `- name: image-saved
   match:
-    extensions: [.pdf]
-  action:
-    type: notify
-    title: "New PDF"
-    message: "{{.Name}}{{.Ext}} arrived in Downloads"`,
-		Tips:      []string{"For webhooks, set message to the URL — file metadata is sent as JSON body", "Combine with action chaining to notify AND move in one rule"},
-		UsefulFor: []string{"Alerting when important files arrive", "Triggering webhooks for automation pipelines", "Monitoring download activity"},
+    extensions: [.png, .jpg, .jpeg]
+  actions:
+    - type: move
+      dest: ~/Pictures/Inbox
+    - type: notify
+      title: "Image saved"
+      message: "{{.Name}}{{.Ext}}"
+      link: "file://{{.Path}}"`,
+		Tips:      []string{"For webhooks, set message to the URL — file metadata (and link, if set) is sent as JSON body", "Combine with action chaining to notify AND move in one rule", "Place notify after the move so {{.Path}} in link resolves to the destination"},
+		UsefulFor: []string{"Alerting when important files arrive", "Triggering webhooks for automation pipelines", "Monitoring download activity", "Clickable banners that jump to the moved file"},
 	},
 	"convert": {
 		Name:        "convert",

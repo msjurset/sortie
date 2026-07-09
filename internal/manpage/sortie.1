@@ -388,7 +388,12 @@ Send a desktop notification or webhook. Uses \fBosascript\fR on macOS,
 \fBnotify\-send\fR on Linux, and PowerShell \fBBurntToast\fR on Windows (with a
 stderr fallback when BurntToast is not installed). If \fBmessage\fR starts with
 http:// or https://, an HTTP POST with file metadata is sent instead. Requires
-\fBtitle\fR and \fBmessage\fR fields. Not undoable.
+\fBtitle\fR and \fBmessage\fR fields. The optional \fBlink\fR field
+(template\-expanded) makes the banner clickable: pass a \fBfile://\fR URL to
+open the file or \fBhttps://\fR to open a URL. Click handling needs
+\fBterminal\-notifier\fR on macOS (otherwise it falls back to a plain banner with
+a one\-time warning); Linux uses Pango \fB<a href>\fR markup with
+\fBnotify\-send\fR; Windows adds a BurntToast button. Not undoable.
 .TP
 .B convert
 Run an external converter tool. Requires \fBtool\fR (e.g., "ffmpeg", "convert",
@@ -483,6 +488,14 @@ Shell command (template\-expanded, supports \fB{{.Path}}\fR). Used by exec.
 .TP
 .B title\fR, \fBmessage
 Notification title and body (template\-expanded). Used by notify.
+.TP
+.B link
+Clickable URL or \fBfile://\fR path (template\-expanded). Used by notify. On
+macOS, requires \fBterminal\-notifier\fR (\fBbrew install terminal\-notifier\fR);
+without it the banner is shown but is not clickable. On Linux, the message is
+wrapped in Pango \fB<a href>\fR markup and is clickable in any notification
+daemon that supports it (GNOME, KDE, Dunst). On Windows, BurntToast adds an
+"Open" button that activates the link.
 .TP
 .B tool
 External binary name. Used by convert (required), resize (default: "sips"),
@@ -796,6 +809,22 @@ rules:
       type: notify
       title: "New PDF"
       message: "{{.Name}}{{.Ext}} arrived in Downloads"
+.fi
+.PP
+File downloaded \- show a clickable banner that opens the moved file:
+.PP
+.nf
+rules:
+  \- name: image\-saved
+    match:
+      extensions: [.png, .jpg, .jpeg]
+    actions:
+      \- type: move
+        dest: ~/Pictures/Inbox
+      \- type: notify
+        title: "Image saved"
+        message: "{{.Name}}{{.Ext}}"
+        link: "file://{{.Path}}"
 .fi
 .PP
 Post to a webhook when a large file appears:

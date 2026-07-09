@@ -425,7 +425,7 @@ func validateCaptureRefs(r Rule) []Finding {
 	// Collect all template strings from actions
 	var templates []string
 	for _, a := range r.ResolvedActions() {
-		templates = append(templates, a.Dest, a.Command, a.Title, a.Message, a.Args, a.Remote)
+		templates = append(templates, a.Dest, a.Command, a.Title, a.Message, a.Link, a.Args, a.Remote)
 	}
 
 	// Check if any template references .Match.

@@ -10,6 +10,7 @@ import (
 	"github.com/msjurset/sortie/internal/config"
 	"github.com/msjurset/sortie/internal/rule"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 var rulesFlags struct {
@@ -151,6 +152,28 @@ func runRulesTest(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func wrapText(text string, maxWidth int) []string {
+	if maxWidth <= 0 || len(text) <= maxWidth {
+		return []string{text}
+	}
+	var lines []string
+	for len(text) > maxWidth {
+		cut := maxWidth
+		if idx := strings.LastIndexByte(text[:maxWidth], ' '); idx > 0 {
+			cut = idx
+			lines = append(lines, text[:cut])
+			text = text[cut+1:]
+		} else {
+			lines = append(lines, text[:cut])
+			text = text[cut:]
+		}
+	}
+	if len(text) > 0 {
+		lines = append(lines, text)
+	}
+	return lines
+}
+
 func printRules(rules []rule.Rule) {
 	hasPriority := false
 	for _, r := range rules {
@@ -160,12 +183,16 @@ func printRules(rules []rule.Rule) {
 		}
 	}
 
-	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	if hasPriority {
-		fmt.Fprintln(w, "  NAME\tPRI\tACTION\tMATCH\tDEST")
-	} else {
-		fmt.Fprintln(w, "  NAME\tACTION\tMATCH\tDEST")
+	type row struct {
+		name, pri, act, match, dest string
 	}
+	var rows []row
+	
+	maxName := len("NAME")
+	maxPri := len("PRI")
+	maxAct := len("ACTION")
+	maxMatch := len("MATCH")
+	maxDest := len("DEST")
 
 	for _, r := range rules {
 		match := summarizeMatch(r.Match)
@@ -187,11 +214,100 @@ func printRules(rules []rule.Rule) {
 			actionStr = strings.Join(types, " → ")
 			destStr = "(chain)"
 		}
-
+		
+		priStr := ""
 		if hasPriority {
-			fmt.Fprintf(w, "  %s\t%d\t%s\t%s\t%s\n", r.Name, r.Priority, actionStr, match, destStr)
-		} else {
-			fmt.Fprintf(w, "  %s\t%s\t%s\t%s\n", r.Name, actionStr, match, destStr)
+			priStr = fmt.Sprintf("%d", r.Priority)
+		}
+
+		rows = append(rows, row{r.Name, priStr, actionStr, match, destStr})
+
+		if len(r.Name) > maxName {
+			maxName = len(r.Name)
+		}
+		if len(priStr) > maxPri {
+			maxPri = len(priStr)
+		}
+		if len(actionStr) > maxAct {
+			maxAct = len(actionStr)
+		}
+		if len(match) > maxMatch {
+			maxMatch = len(match)
+		}
+		if len(destStr) > maxDest {
+			maxDest = len(destStr)
+		}
+	}
+
+	padding := 2
+	fixedWidth := 2 + maxName + padding + maxAct + padding
+	if hasPriority {
+		fixedWidth += maxPri + padding
+	}
+
+	termWidth, _, err := term.GetSize(int(os.Stdout.Fd()))
+	if err != nil || termWidth <= 0 {
+		termWidth = 120
+	}
+
+	allocMatch := maxMatch
+	allocDest := maxDest
+
+	if fixedWidth+maxMatch+padding+maxDest > termWidth {
+		remaining := termWidth - fixedWidth - padding
+		if remaining > 40 {
+			// Distribute remaining width between MATCH (60%) and DEST (40%)
+			if maxDest < remaining*40/100 {
+				allocMatch = remaining - maxDest
+			} else if maxMatch < remaining*60/100 {
+				allocDest = remaining - maxMatch
+			} else {
+				allocMatch = remaining * 60 / 100
+				allocDest = remaining - allocMatch
+			}
+		}
+	}
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, padding, ' ', 0)
+	if hasPriority {
+		fmt.Fprintln(w, "  NAME\tPRI\tACTION\tMATCH\tDEST")
+	} else {
+		fmt.Fprintln(w, "  NAME\tACTION\tMATCH\tDEST")
+	}
+
+	for _, row := range rows {
+		matchLines := wrapText(row.match, allocMatch)
+		destLines := wrapText(row.dest, allocDest)
+		
+		maxLines := len(matchLines)
+		if len(destLines) > maxLines {
+			maxLines = len(destLines)
+		}
+		
+		for i := 0; i < maxLines; i++ {
+			name := ""
+			pri := ""
+			act := ""
+			match := ""
+			dest := ""
+			
+			if i == 0 {
+				name = row.name
+				pri = row.pri
+				act = row.act
+			}
+			if i < len(matchLines) {
+				match = matchLines[i]
+			}
+			if i < len(destLines) {
+				dest = destLines[i]
+			}
+			
+			if hasPriority {
+				fmt.Fprintf(w, "  %s\t%s\t%s\t%s\t%s\n", name, pri, act, match, dest)
+			} else {
+				fmt.Fprintf(w, "  %s\t%s\t%s\t%s\n", name, act, match, dest)
+			}
 		}
 	}
 	w.Flush()
@@ -222,6 +338,9 @@ func summarizeMatch(m rule.Match) string {
 	}
 	if m.MimeType != "" {
 		parts = append(parts, fmt.Sprintf("mime:%s", m.MimeType))
+	}
+	if m.Origin != "" {
+		parts = append(parts, fmt.Sprintf("origin:%q", m.Origin))
 	}
 	if m.Content != "" {
 		parts = append(parts, fmt.Sprintf("content:%q", m.Content))
@@ -259,6 +378,9 @@ func summarizeAction(a rule.Action) string {
 		}
 		if a.Message != "" {
 			parts = append(parts, fmt.Sprintf("message:%s", a.Message))
+		}
+		if a.Link != "" {
+			parts = append(parts, fmt.Sprintf("link:%s", a.Link))
 		}
 	case rule.ActionConvert:
 		if a.Tool != "" {

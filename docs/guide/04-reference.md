@@ -71,6 +71,7 @@ Every condition in a rule's `match:` block must be satisfied for the rule to fir
 | `min_size` / `max_size` | size | File size within range (`500MB`, `1GB`, `42KB`) |
 | `min_age` / `max_age` | duration | File mtime within range (`30d`, `2h`, `5m`, `10s`) |
 | `mime_type` | string | Detected MIME type starts with the given prefix |
+| `origin` | string | Download origin URL (kMDItemWhereFroms on macOS, user.xdg.origin.url on Linux, Zone.Identifier on Windows) contains substring |
 | `content` | string | File content contains the substring (case-insensitive) |
 | `content_regex` | string | File content matches the regex; named captures become `{{.Match.<name>}}` |
 | `content_bytes` | integer | Max bytes to read for content matching. Default `65536` |
@@ -98,7 +99,7 @@ For full semantics see [Concepts › Matching](02-concepts.md#matching).
 | `watermark` | ✓ | all | `composite` (ImageMagick) |
 | `ocr` | ✓ | all | `tesseract` |
 | `exec` | ✗ | all | — |
-| `notify` | ✗ | all | `osascript` (macOS), `notify-send` (Linux), `BurntToast` (Windows, optional) |
+| `notify` | ✗ | all | `osascript` (macOS), `notify-send` (Linux), `BurntToast` (Windows, optional). For clickable banners (`link:` field): `terminal-notifier` on macOS (optional), Pango `<a href>` via `notify-send` on Linux, BurntToast button on Windows. |
 | `upload` | ✗ | all | `aws` (for `s3://`), `gsutil` (for `gs://`) |
 | `tag` | ✗ | macOS only | `xattr` (built-in) |
 | `open` | ✗ | macOS only | `open` (built-in) |
@@ -108,7 +109,7 @@ For field-level detail on each action, run `sortie actions <name>` or see the [C
 
 ## Template variables
 
-Available in `dest`, `command`, `message`, `title`, `args`, `remote`, and `tags`.
+Available in `dest`, `command`, `message`, `title`, `link`, `args`, `remote`, and `tags`.
 
 | Variable | Produces | Example |
 |----------|----------|---------|
@@ -246,7 +247,8 @@ match:
   max_size: 1GB                        # size string
   min_age: 30d                         # duration string (s/m/h/d)
   max_age: 2h                          # duration string
-  mime_type: image/                    # string, prefix match
+  mime_type: image/
+  origin: github.com                   # string, substring match on download URL                    # string, prefix match
   content: "invoice"                   # string, case-insensitive substring on file content
   content_regex: '(?P<vendor>Acme)'    # string, RE2 regex on file content
   content_bytes: 65536                 # int, max bytes to read for content. default 65536
@@ -460,9 +462,30 @@ Templates: all standard variables available. **Not reversible.**
 type: notify
 title:       # optional — string, template-expanded; default "sortie"
 message:     # optional — string, template-expanded; if starts with http://, sends webhook POST
+link:        # optional — string, template-expanded; URL or file:// path that the banner opens when clicked
 ```
 
-Backend per platform: `osascript` (macOS), `notify-send` (Linux), `BurntToast` with stderr fallback (Windows). Webhook payload: `{title, file, path, size}` as JSON. **Not reversible.**
+Backend per platform: `osascript` (macOS), `notify-send` (Linux), `BurntToast` with stderr fallback (Windows). Webhook payload: `{title, file, path, size, link?}` as JSON. **Not reversible.**
+
+When `link:` is set, the banner becomes clickable. Backends:
+
+- **macOS:** uses `terminal-notifier` (`brew install terminal-notifier`). If it isn't installed, the plain `osascript` banner is shown and a one-time warning is logged (`link` is silently dropped on subsequent calls in the same session).
+- **Linux:** wraps `message` in Pango `<a href="…">…</a>` markup. Most modern notification daemons (GNOME Shell, KDE Plasma, Dunst) handle the click via `xdg-open`.
+- **Windows:** adds a BurntToast `New-BTButton -Content 'Open' -Arguments '<link>'` so the link opens via the default protocol handler.
+
+Typical patterns:
+
+```yaml
+- type: notify
+  title: "Image saved"
+  message: "{{.Name}}{{.Ext}}"
+  link: "file://{{.Path}}"        # opens the file (use after a move so .Path is the destination)
+
+- type: notify
+  title: "Invoice from {{.Match.company}}"
+  message: "Open in vendor portal"
+  link: "https://vendors.example.com/{{.Match.company}}"
+```
 
 ### `upload` — push to cloud storage
 
@@ -634,7 +657,7 @@ References: [Go regexp/syntax docs](https://pkg.go.dev/regexp/syntax) for the fu
 
 ## F. Template language reference
 
-sortie expands several `Action` fields with Go's [`text/template`](https://pkg.go.dev/text/template) package: `dest`, `command`, `message`, `title`, `args`, `remote`, `tags`. The variables come from the source file's metadata; the template language adds simple control flow.
+sortie expands several `Action` fields with Go's [`text/template`](https://pkg.go.dev/text/template) package: `dest`, `command`, `message`, `title`, `link`, `args`, `remote`, `tags`. The variables come from the source file's metadata; the template language adds simple control flow.
 
 ### Variables
 

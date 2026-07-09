@@ -51,6 +51,7 @@ type Match struct {
 	MinAge       string   `yaml:"min_age,omitempty"`
 	MaxAge       string   `yaml:"max_age,omitempty"`
 	MimeType     string   `yaml:"mime_type,omitempty"`
+	Origin       string   `yaml:"origin,omitempty"`        // match against download origin URL
 	Content      string   `yaml:"content,omitempty"`       // case-insensitive substring search on file content
 	ContentRegex string   `yaml:"content_regex,omitempty"` // regex search on file content
 	ContentBytes int      `yaml:"content_bytes,omitempty"` // max bytes to read (default 65536)
@@ -93,6 +94,7 @@ type Action struct {
 	Command    string     `yaml:"command,omitempty"`     // exec: shell command template
 	Title      string     `yaml:"title,omitempty"`       // notify: notification title
 	Message    string     `yaml:"message,omitempty"`     // notify: body text or webhook URL
+	Link       string     `yaml:"link,omitempty"`        // notify: clickable URL or file:// path (template-expanded)
 	Tool       string     `yaml:"tool,omitempty"`        // convert/resize/watermark/ocr/encrypt/decrypt: binary name
 	Args       string     `yaml:"args,omitempty"`        // convert/resize/watermark: extra arguments template
 	Width      int        `yaml:"width,omitempty"`       // resize: target width in pixels
@@ -201,6 +203,20 @@ func (r *Rule) MatchWithCaptures(fi FileInfo) (bool, map[string]string) {
 	if r.Match.MimeType != "" {
 		detected := detectMIME(fi.Path)
 		if !strings.HasPrefix(detected, r.Match.MimeType) {
+			return false, nil
+		}
+	}
+
+	if r.Match.Origin != "" {
+		origins := getFileOrigins(fi.Path)
+		matched := false
+		for _, o := range origins {
+			if strings.Contains(strings.ToLower(o), strings.ToLower(r.Match.Origin)) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
 			return false, nil
 		}
 	}
