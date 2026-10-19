@@ -14,6 +14,7 @@ type TemplateData struct {
 	Name  string            // filename without extension
 	Ext   string            // extension including dot
 	Path  string            // full source file path
+	Dir   string            // directory containing the source file
 	Year  string            // 4-digit year from mod time
 	Month string            // 2-digit month
 	Day   string            // 2-digit day
@@ -90,6 +91,7 @@ func templateData(fi FileInfo, base, ext string, captures ...map[string]string) 
 		Name:  base,
 		Ext:   ext,
 		Path:  fi.Path,
+		Dir:   filepath.Dir(fi.Path),
 		Year:  modTime.Format("2006"),
 		Month: modTime.Format("01"),
 		Day:   modTime.Format("02"),
